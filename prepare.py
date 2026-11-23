@@ -1,7 +1,7 @@
-"""Fixed harness: data, splits, evaluation. Do not modify.
+"""Fixed harness: data, splits, metric. Do not modify.
 
-Downloads the TDC Caco2_Wang benchmark and defines the metric. train.py
-imports run() from here and supplies the two things it is allowed to change.
+run() scores a featurizer/model pair. It returns numbers and prints nothing;
+experiment.py decides what to do with them.
 """
 
 import resource
@@ -15,10 +15,6 @@ TASK = "Caco2_Wang"
 DATA_DIR = "data/"
 SEEDS = (1, 2, 3, 4, 5)
 TIMEOUT_SECONDS = 600
-
-
-def _group():
-    return admet_group(path=DATA_DIR)
 
 
 def _check(X, n_rows, label):
@@ -38,18 +34,17 @@ def _peak_gb():
 
 
 def run(featurize, make_model, split="valid"):
-    """Score a featurizer/model pair over the five seeds.
+    """Score over the five seeds.
 
-    split="valid" during the loop. split="test" is the held-out set and is
-    only for the final result, never for keep/discard decisions.
+    split="valid" drives keep/discard. split="test" is the audit set and is
+    only ever called by experiment.py, which never shows the result.
     """
     start = time.time()
-    group = _group()
+    group = admet_group(path=DATA_DIR)
     benchmark = group.get(TASK)
     name = benchmark["name"]
-    binary = set(benchmark["train_val"]["Y"].unique()) <= {0, 1}
 
-    scores, train_scores = [], []
+    held_scores, train_scores = [], []
     for seed in SEEDS:
         train, valid = group.get_train_valid_split(
             benchmark=name, split_type="default", seed=seed
@@ -63,26 +58,32 @@ def run(featurize, make_model, split="valid"):
 
         model = make_model(seed)
         model.fit(X, train["Y"].values)
-        pred = model.predict(X_held)
-        scores.append(float(np.mean(np.abs(pred - held["Y"].values))))
+        held_scores.append(
+            float(np.mean(np.abs(model.predict(X_held) - held["Y"].values)))
+        )
         train_scores.append(
             float(np.mean(np.abs(model.predict(X) - train["Y"].values)))
         )
 
-    mean, std = float(np.mean(scores)), float(np.std(scores))
-    train_mean = float(np.mean(train_scores))
-    gap = mean - train_mean
-    print("---")
-    print(f"{split}_mae:         {mean:.6f}")
-    print(f"{split}_mae_std:     {std:.6f}")
-    print(f"train_mae:        {train_mean:.6f}")
-    print(f"gap:              {gap:.6f}")
-    # Diagnostic only. The gap is NOT a keep/discard criterion: minimising it
-    # selects for underfitting (predicting the mean has a gap near zero). A
-    # small gap alongside a very low error is the signature of leakage.
-    if gap < 0.05 and mean < 0.30:
-        print("WARNING:          small gap with low error - check for leakage")
-    print(f"n_features:       {X.shape[1]}")
-    print(f"peak_memory_gb:   {_peak_gb():.2f}")
-    print(f"total_seconds:    {time.time() - start:.1f}")
-    return mean, std
+    return {
+        "split": split,
+        "mae": float(np.mean(held_scores)),
+        "mae_std": float(np.std(held_scores)),
+        "train_mae": float(np.mean(train_scores)),
+        "n_features": int(X.shape[1]),
+        "peak_memory_gb": _peak_gb(),
+        "seconds": time.time() - start,
+    }
+
+
+def format_summary(m):
+    split = m["split"]
+    return "\n".join([
+        "---",
+        f"{split}_mae:         {m['mae']:.6f}",
+        f"{split}_mae_std:     {m['mae_std']:.6f}",
+        f"train_mae:        {m['train_mae']:.6f}",
+        f"n_features:       {m['n_features']}",
+        f"peak_memory_gb:   {m['peak_memory_gb']:.2f}",
+        f"total_seconds:    {m['seconds']:.1f}",
+    ])

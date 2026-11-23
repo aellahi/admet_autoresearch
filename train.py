@@ -4,8 +4,6 @@ featurize() turns SMILES into a feature matrix. make_model() returns an
 unfitted sklearn-style regressor. Everything else is in prepare.py.
 """
 
-import sys
-
 import numpy as np
 from rdkit import Chem, RDLogger
 from rdkit.Chem import rdFingerprintGenerator
@@ -35,5 +33,6 @@ def make_model(seed):
 
 
 if __name__ == "__main__":
-    split = "test" if "--test" in sys.argv else "valid"
-    prepare.run(featurize, make_model, split=split)
+    # A manual scoring run. Experiments go through experiment.py, which also
+    # decides whether to keep the change.
+    print(prepare.format_summary(prepare.run(featurize, make_model)))
