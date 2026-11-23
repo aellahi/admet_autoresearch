@@ -49,7 +49,7 @@ def run(featurize, make_model, split="valid"):
     name = benchmark["name"]
     binary = set(benchmark["train_val"]["Y"].unique()) <= {0, 1}
 
-    scores = []
+    scores, train_scores = [], []
     for seed in SEEDS:
         train, valid = group.get_train_valid_split(
             benchmark=name, split_type="default", seed=seed
@@ -65,11 +65,23 @@ def run(featurize, make_model, split="valid"):
         model.fit(X, train["Y"].values)
         pred = model.predict(X_held)
         scores.append(float(np.mean(np.abs(pred - held["Y"].values))))
+        train_scores.append(
+            float(np.mean(np.abs(model.predict(X) - train["Y"].values)))
+        )
 
     mean, std = float(np.mean(scores)), float(np.std(scores))
+    train_mean = float(np.mean(train_scores))
+    gap = mean - train_mean
     print("---")
     print(f"{split}_mae:         {mean:.6f}")
     print(f"{split}_mae_std:     {std:.6f}")
+    print(f"train_mae:        {train_mean:.6f}")
+    print(f"gap:              {gap:.6f}")
+    # Diagnostic only. The gap is NOT a keep/discard criterion: minimising it
+    # selects for underfitting (predicting the mean has a gap near zero). A
+    # small gap alongside a very low error is the signature of leakage.
+    if gap < 0.05 and mean < 0.30:
+        print("WARNING:          small gap with low error - check for leakage")
     print(f"n_features:       {X.shape[1]}")
     print(f"peak_memory_gb:   {_peak_gb():.2f}")
     print(f"total_seconds:    {time.time() - start:.1f}")

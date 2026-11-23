@@ -52,14 +52,25 @@ a win — keep it.
 
 ```
 ---
-valid_mae:        0.436000
-valid_mae_std:    0.021000
+valid_mae:        0.435680
+valid_mae_std:    0.021162
+train_mae:        0.133869
+gap:              0.301811
 n_features:       2048
-peak_memory_gb:   1.20
-total_seconds:    38.4
+peak_memory_gb:   0.24
+total_seconds:    34.1
 ```
 
-Extract with `grep "^valid_mae:" run.log`.
+Extract with `grep "^valid_mae:\|^gap:" run.log`.
+
+**`train_mae` and `gap` are diagnostics, never criteria.** Keep or discard on
+`valid_mae` alone. Minimising the gap selects for underfitting: predicting the
+training mean scores a gap of 0.015 and a valid_mae of 0.657, the worst model
+available. Read the gap to decide *what to try next*:
+
+- large gap, low train error -> variance problem; regularise or simplify
+- both high -> bias problem; richer features or more capacity
+- small gap with a very low valid_mae -> suspect leakage, not success
 
 ## Logging results
 
