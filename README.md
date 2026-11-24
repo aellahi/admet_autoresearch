@@ -25,7 +25,30 @@ uv run train.py
 
 The first run downloads the benchmark (1.5 MB) into `data/`.
 
-Then point an agent at the repo and ask it to read `program.md`.
+## Running the agent
+
+Launch it with the restricted settings, so the limits apply to that session
+and not to your own:
+
+```bash
+claude --settings agent-settings.json
+```
+
+Then ask it to read `program.md`. `agent-settings.json` turns on the Bash
+sandbox, allows only the three domains the install needs, and denies reads
+of `~/.claude` and the audit log. Check it took effect with `/sandbox`.
+
+## Checking the audit set
+
+Only you run this, and not often:
+
+```bash
+uv run audit.py
+```
+
+It scores the committed `train.py` on the held-out test split and appends to
+`~/.cache/admet_autoresearch/audit.tsv`. Nothing in the agent's loop touches
+the test split. Never feed the number back into the search.
 
 ## The metric
 

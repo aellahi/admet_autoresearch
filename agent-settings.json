@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(//Users/aisha/.claude/**)",
+      "Read(//Users/aisha/.cache/admet_autoresearch/**)",
+      "Read(data/**)",
+      "Edit(prepare.py)",
+      "Edit(experiment.py)",
+      "Edit(audit.py)",
+      "Edit(program.md)",
+      "Edit(agent-settings.json)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "autoAllowBashIfSandboxed": true,
+    "filesystem": {
+      "denyRead": [
+        "~/.claude",
+        "~/.cache/admet_autoresearch"
+      ]
+    },
+    "network": {
+      "allowedDomains": [
+        "dataverse.harvard.edu",
+        "pypi.org",
+        "files.pythonhosted.org"
+      ],
+      "strictAllowlist": true
+    }
+  }
+}

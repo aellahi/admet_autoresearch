@@ -29,12 +29,12 @@ reverts it for you**. You do not decide what to keep and you do not commit.
   any RDKit representation, any sklearn-compatible regressor.
 
 **What you CANNOT do:**
-- Modify `prepare.py` or `experiment.py`. They hold the data, the metric
-  and the keep/discard rule.
+- Modify `prepare.py`, `experiment.py` or `audit.py`. They hold the data,
+  the metric and the keep/discard rule.
 - Add dependencies beyond `pyproject.toml`.
-- Touch the test split. It is scored periodically by `experiment.py` and
-  written where you cannot see it. It is not yours to read, and reading it
-  would invalidate the whole run.
+- Run `audit.py`, or touch the test split in any other way. The audit set
+  is the human's, scored outside this loop. Using it here would destroy
+  the only unbiased measurement of your work.
 
 **The goal: lowest `valid_mae`.** Lower is better.
 

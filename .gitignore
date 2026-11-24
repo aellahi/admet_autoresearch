@@ -2,5 +2,6 @@
 data/
 results.tsv
 run.log
+.runs/
 __pycache__/
 *.pyc
