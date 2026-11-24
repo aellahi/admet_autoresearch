@@ -61,12 +61,12 @@ a win — keep it.
 ```
 ---
 status:           DISCARD
-valid_mae:        0.441203
-valid_mae_std:    0.019884
-train_mae:        0.141022
-n_features:       4096
-peak_memory_gb:   0.31
-total_seconds:    36.2
+valid_mae:        <float>
+valid_mae_std:    <float>
+train_mae:        <float>
+n_features:       <int>
+peak_memory_gb:   <float>
+total_seconds:    <float>
 ```
 
 Extract with `grep "^status:\|^valid_mae:" run.log`.
@@ -88,9 +88,8 @@ next, not whether something worked:
 
 ```
 commit	train_mae	valid_mae	status	description
-8b86d44	0.133869	0.435680	keep	baseline ECFP4 + random forest
-399c80d	0.120413	0.374902	keep	210 RDKit descriptors
-399c80d	0.141022	0.441203	discard	radius 3 fingerprint
+<sha>	<float>	<float>	keep	<what you changed>
+<sha>	<float>	<float>	discard	<what you changed>
 ```
 
 Read it at the start of each experiment so you do not repeat yourself.
