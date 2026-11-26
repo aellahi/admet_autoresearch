@@ -18,11 +18,14 @@ Autonomous experimentation on TDC's Caco2_Wang permeability benchmark.
 Run an experiment with:
 
 ```
-uv run experiment.py "what this tried" > run.log 2>&1
+uv run experiment.py "what this tried"
 ```
 
 It scores the current `train.py` over five seeds and then **commits or
 reverts it for you**. You do not decide what to keep and you do not commit.
+
+This is the only shell command you can run. Everything else is refused, so
+read files with your file tools rather than through the shell.
 
 **What you CAN do:**
 - Modify `train.py`. `featurize()` and `make_model()` are both fair game:
@@ -43,8 +46,10 @@ reverts it for you**. You do not decide what to keep and you do not commit.
   handle unparseable SMILES, and be deterministic. `prepare.py` checks this.
 - Anything with fitted state (scaling, PCA, feature selection) must fit on
   train only. Fitting on the held-out split is leakage and invalidates the run.
-- The machine has 4 cores and 8 GB RAM. Keep `n_jobs` at 4 or below. If a run
-  exceeds 10 minutes, kill it and treat it as a failure.
+- The machine has 4 cores and 8 GB RAM. Keep `n_jobs` at 4 or below.
+  `experiment.py` kills a run that exceeds 10 minutes.
+- There is no network. Everything you need is already installed; you cannot
+  add a package or download anything.
 
 **Noise floor**: the validation set is 91 molecules. A difference below
 **0.03 MAE** on the five-seed mean is not meaningful. `experiment.py`
@@ -69,7 +74,7 @@ peak_memory_gb:   <float>
 total_seconds:    <float>
 ```
 
-Extract with `grep "^status:\|^valid_mae:" run.log`.
+That output is short, so read it straight from the command's output.
 
 `status` is the decision, already applied. `KEEP` means the change is
 committed; `DISCARD` means `train.py` has been reverted and the working tree
@@ -98,13 +103,12 @@ Read it at the start of each experiment so you do not repeat yourself.
 
 LOOP FOREVER:
 
-1. Read `results.tsv` and the git log: what has been tried, what was kept.
+1. Read `results.tsv`: what has been tried, and what was kept.
 2. Edit `train.py` with one experimental idea.
-3. `uv run experiment.py "short description" > run.log 2>&1`
-   (redirect; do not flood your context)
-4. `grep "^status:\|^valid_mae:\|^train_mae:" run.log`
-5. Empty output means a crash. `tail -n 50 run.log` for the trace, then fix
-   or abandon after a few attempts.
+3. `uv run experiment.py "short description"`
+4. Read the `status` and `valid_mae` it printed.
+5. A traceback instead means a crash. Fix it, or abandon the idea after a
+   few attempts.
 6. Go to 1.
 
 There is no step where you commit, revert, or decide. `experiment.py` has

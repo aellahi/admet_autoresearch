@@ -49,9 +49,18 @@ and not to your own:
 claude --settings agent-settings.json
 ```
 
-Then ask it to read `program.md`. `agent-settings.json` turns on the Bash
-sandbox, allows only the three domains the install needs, and denies reads
-of `~/.claude` and the audit log. Check it took effect with `/sandbox`.
+Then ask it to read `program.md`. `agent-settings.json` gives that session:
+
+- **one shell command**, `uv run experiment.py` — everything else is refused
+- **no network at all**, since the loop reads local CSVs and needs none
+- **no reads** of `data/holdout`, the audit log or `~/.claude`
+- **no edits** outside `train.py`
+
+Verify with `/sandbox`. `failIfUnavailable` means the session refuses to
+start rather than running unsandboxed, so if it launches, the sandbox is on.
+
+Run `uv sync` and `setup.py` before this, in your own session — they are the
+only steps that need network.
 
 ## Checking the audit set
 

@@ -1,5 +1,11 @@
 {
   "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": [
+      "Bash(uv run experiment.py:*)",
+      "Read(//Users/aisha/projects/admet_autoresearch/**)",
+      "Edit(train.py)"
+    ],
     "deny": [
       "Read(//Users/aisha/projects/admet_autoresearch/data/holdout/**)",
       "Read(//Users/aisha/.cache/admet_autoresearch/**)",
@@ -16,7 +22,6 @@
     "enabled": true,
     "failIfUnavailable": true,
     "allowUnsandboxedCommands": false,
-    "autoAllowBashIfSandboxed": true,
     "filesystem": {
       "denyRead": [
         "/Users/aisha/projects/admet_autoresearch/data/holdout",
@@ -25,10 +30,7 @@
       ]
     },
     "network": {
-      "allowedDomains": [
-        "pypi.org",
-        "files.pythonhosted.org"
-      ],
+      "allowedDomains": [],
       "strictAllowlist": true
     }
   }
