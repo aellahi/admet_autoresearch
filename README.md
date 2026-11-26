@@ -9,21 +9,36 @@ Framework after [karpathy/autoresearch](https://github.com/karpathy/autoresearch
 
 ## Files
 
-| file | role |
-| --- | --- |
-| `prepare.py` | Data, splits, metric. Fixed. |
-| `train.py` | `featurize()` and `make_model()`. The agent edits this. |
-| `program.md` | Instructions for the agent. You edit this. |
-| `results.tsv` | Experiment log. Untracked. |
+| file | role | who runs it |
+| --- | --- | --- |
+| `setup.py` | Downloads the benchmark, writes the splits to disk | you, once |
+| `prepare.py` | `run_validation()` and `run_audit()`. The metric. | imported |
+| `train.py` | `featurize()` and `make_model()` | the agent edits |
+| `experiment.py` | Scores validation, decides keep/discard, moves git | the agent |
+| `audit.py` | Scores the held-out test set | you, rarely |
+| `program.md` | Instructions for the agent | you edit |
 
 ## Quick start
 
 ```bash
 uv sync
+uv run setup.py
 uv run train.py
 ```
 
-The first run downloads the benchmark (1.5 MB) into `data/`.
+`setup.py` downloads the benchmark (1.5 MB) and splits it into two trees:
+
+```
+data/splits/seed{1..5}/train.csv   the agent's world
+data/splits/seed{1..5}/valid.csv
+data/holdout/test.csv              the audit set
+data/holdout/raw/                  raw download, holds test labels
+```
+
+`prepare.run_validation()` names no path under `data/holdout`, so the
+validation process never has test labels in memory. Verified by setting
+`data/holdout` to mode `000`: validation still scored 0.435680, and
+`audit.py` failed with `PermissionError`.
 
 ## Running the agent
 

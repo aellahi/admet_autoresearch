@@ -1,20 +1,29 @@
-"""Fixed harness: data, splits, metric. Do not modify.
+"""Fixed harness: splits and metric. Do not modify.
 
-run() scores a featurizer/model pair. It returns numbers and prints nothing;
-experiment.py decides what to do with them.
+Two entry points, deliberately separate:
+
+    run_validation()  reads data/splits only. This is what the loop calls.
+    run_audit()       reads data/holdout/test.csv. Only audit.py calls it.
+
+run_validation names no path under data/holdout, so the validation process
+never has test labels in memory. There is no flag that makes it load them.
 """
 
 import resource
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
-from tdc.benchmark_group import admet_group
+import pandas as pd
 
-TASK = "Caco2_Wang"
-DATA_DIR = "data/"
+SPLITS = Path("data/splits")
 SEEDS = (1, 2, 3, 4, 5)
 TIMEOUT_SECONDS = 600
+
+# Named here only so audit.py can import it. Nothing in the validation path
+# below refers to it.
+HOLDOUT_TEST = Path("data/holdout/test.csv")
 
 
 def _check(X, n_rows, label):
@@ -33,24 +42,19 @@ def _peak_gb():
     return rss / 1024 ** 3
 
 
-def run(featurize, make_model, split="valid"):
-    """Score over the five seeds.
+def _train(seed):
+    path = SPLITS / f"seed{seed}" / "train.csv"
+    if not path.exists():
+        raise SystemExit(f"{path} is missing. Run: uv run setup.py")
+    return pd.read_csv(path)
 
-    split="valid" drives keep/discard. split="test" is the audit set and is
-    only ever called by experiment.py, which never shows the result.
-    """
+
+def _score(featurize, make_model, pairs, split):
+    """pairs: [(seed, train_df, held_df), ...], one per seed."""
     start = time.time()
-    group = admet_group(path=DATA_DIR)
-    benchmark = group.get(TASK)
-    name = benchmark["name"]
-
     held_scores, train_scores = [], []
-    for seed in SEEDS:
-        train, valid = group.get_train_valid_split(
-            benchmark=name, split_type="default", seed=seed
-        )
-        held = benchmark["test"] if split == "test" else valid
 
+    for seed, train, held in pairs:
         X = featurize(list(train["Drug"]))
         _check(X, len(train), "train features")
         X_held = featurize(list(held["Drug"]))
@@ -74,6 +78,26 @@ def run(featurize, make_model, split="valid"):
         "peak_memory_gb": _peak_gb(),
         "seconds": time.time() - start,
     }
+
+
+def run_validation(featurize, make_model):
+    """Score on the validation splits. Opens nothing under data/holdout."""
+    pairs = []
+    for seed in SEEDS:
+        valid_path = SPLITS / f"seed{seed}" / "valid.csv"
+        if not valid_path.exists():
+            raise SystemExit(f"{valid_path} is missing. Run: uv run setup.py")
+        pairs.append((seed, _train(seed), pd.read_csv(valid_path)))
+    return _score(featurize, make_model, pairs, "valid")
+
+
+def run_audit(featurize, make_model):
+    """Score on the held-out test set. Called only by audit.py."""
+    if not HOLDOUT_TEST.exists():
+        raise SystemExit(f"{HOLDOUT_TEST} is missing. Run: uv run setup.py")
+    test = pd.read_csv(HOLDOUT_TEST)
+    pairs = [(seed, _train(seed), test) for seed in SEEDS]
+    return _score(featurize, make_model, pairs, "test")
 
 
 def format_summary(m):

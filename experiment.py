@@ -62,7 +62,7 @@ def main():
     signal.alarm(prepare.TIMEOUT_SECONDS)
     try:
         import train
-        m = prepare.run(train.featurize, train.make_model, split="valid")
+        m = prepare.run_validation(train.featurize, train.make_model)
     except Timeout:
         _finish(state, None, "crash", description,
                 f"timeout after {prepare.TIMEOUT_SECONDS}s")

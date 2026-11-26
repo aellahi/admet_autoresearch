@@ -1,12 +1,13 @@
 {
   "permissions": {
     "deny": [
-      "Read(//Users/aisha/.claude/**)",
+      "Read(//Users/aisha/projects/admet_autoresearch/data/holdout/**)",
       "Read(//Users/aisha/.cache/admet_autoresearch/**)",
-      "Read(data/**)",
+      "Read(//Users/aisha/.claude/**)",
       "Edit(prepare.py)",
       "Edit(experiment.py)",
       "Edit(audit.py)",
+      "Edit(setup.py)",
       "Edit(program.md)",
       "Edit(agent-settings.json)"
     ]
@@ -18,13 +19,13 @@
     "autoAllowBashIfSandboxed": true,
     "filesystem": {
       "denyRead": [
-        "~/.claude",
-        "~/.cache/admet_autoresearch"
+        "/Users/aisha/projects/admet_autoresearch/data/holdout",
+        "~/.cache/admet_autoresearch",
+        "~/.claude"
       ]
     },
     "network": {
       "allowedDomains": [
-        "dataverse.harvard.edu",
         "pypi.org",
         "files.pythonhosted.org"
       ],

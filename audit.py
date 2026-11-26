@@ -5,14 +5,15 @@
 Scores whatever train.py is currently committed, appends the result to
 ~/.cache/admet_autoresearch/audit.tsv, and prints it.
 
-Keep this out of the agent's loop. Every time the test set is used to make
-a decision it stops being held out, so run it occasionally -- every ten or
-twenty keeps -- and never feed the number back into the search.
+This is the only script besides setup.py that opens data/holdout. Every time
+the test set informs a decision it stops being held out, so run it
+occasionally -- every ten or twenty keeps -- and never feed the number back
+into the search.
 """
 
+import subprocess
 from datetime import datetime
 from pathlib import Path
-import subprocess
 
 import prepare
 import train
@@ -27,7 +28,7 @@ def main():
         capture_output=True, text=True, check=False,
     ).stdout.strip()
 
-    m = prepare.run(train.featurize, train.make_model, split="test")
+    m = prepare.run_audit(train.featurize, train.make_model)
 
     AUDIT_DIR.mkdir(parents=True, exist_ok=True)
     if not AUDIT_LOG.exists():

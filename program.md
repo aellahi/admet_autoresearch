@@ -8,8 +8,8 @@ Autonomous experimentation on TDC's Caco2_Wang permeability benchmark.
    The branch `autoresearch/<tag>` must not already exist.
 2. **Create the branch**: `git checkout -b autoresearch/<tag>` from main.
 3. **Read the in-scope files**: `README.md`, `prepare.py`, `train.py`.
-4. **Verify data exists**: check `data/` holds `admet_group/`. If not, the
-   first run downloads it (1.5 MB).
+4. **Verify data exists**: check `data/splits/seed1/` holds `train.csv` and
+   `valid.csv`. If not, tell the human to run `uv run setup.py`.
 5. **Initialize results.tsv** with just the header row.
 6. **Confirm and go.**
 

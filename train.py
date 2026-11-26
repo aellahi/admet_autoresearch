@@ -35,4 +35,4 @@ def make_model(seed):
 if __name__ == "__main__":
     # A manual scoring run. Experiments go through experiment.py, which also
     # decides whether to keep the change.
-    print(prepare.format_summary(prepare.run(featurize, make_model)))
+    print(prepare.format_summary(prepare.run_validation(featurize, make_model)))
