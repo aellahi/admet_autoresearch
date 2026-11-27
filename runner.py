@@ -28,12 +28,24 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
+from scipy import stats
+
 import prepare
 import report
 
-# Measured noise floor: the smallest paired difference distinguishable on
-# 91 validation molecules across five seeds is about 0.027 MAE.
-KEEP_THRESHOLD = 0.03
+# A change is kept when a paired t-test over the five splits says its
+# scores are better than the incumbent's, not when it clears a constant.
+# The five splits are the same for both models, and which molecules land in
+# a split drives ~54x more variance than anything else, so pairing removes
+# the dominant term. A fixed bar cannot: it was sized for the spread
+# BETWEEN splits, which a paired comparison never has to span.
+ALPHA = 0.05
+# A simplification claims no real cost, not an improvement, so what matters
+# is the SIZE of any loss rather than whether it is detectable. A perfectly
+# consistent 0.002 loss is statistically certain and practically nothing;
+# significance alone would reject it.
+SIMPLIFY_TOLERANCE = 0.01
 # A change that scores the same but uses this fraction of the features or
 # fewer is kept as a simplification. Same accuracy from less model is a win,
 # and it is not a claim of improvement, so it cannot bank noise.
@@ -174,9 +186,11 @@ def _load_train():
 
 
 DEFAULT_STATE = {
-    "best_valid_mae": None,    # best ever kept: the bar a keep must beat
+    "best_valid_mae": None,    # best ever kept: what a keep must beat
+    "best_scores": None,       # its five per-split MAEs, for the paired test
     "best_commit": None,       # the commit that achieved it, so it is findable
     "current_valid_mae": None, # what the committed model scores right now
+    "current_scores": None,    # its five per-split MAEs
     "current_features": None,
     "simplify_chain": 0,
     "keeps": 0,
@@ -196,28 +210,49 @@ def _save_state(s):
     STATE.write_text(json.dumps(s, indent=2))
 
 
-def _verdict(mae, features, s):
-    """keep | simplify | discard. The only place this is decided."""
-    best = s["best_valid_mae"]
-    if best is None or best - mae > KEEP_THRESHOLD:
+def _paired(candidate, incumbent):
+    """Paired t-test over the five splits. Returns (mean difference, p).
+
+    A negative difference means the candidate scores lower, which is better.
+    """
+    if not incumbent or len(incumbent) != len(candidate) or len(candidate) < 2:
+        return None, None
+    diffs = [c - i for c, i in zip(candidate, incumbent)]
+    if all(d == diffs[0] for d in diffs):
+        # No spread, so t is undefined. Identical means no difference;
+        # a perfectly constant offset is detectable with certainty.
+        return float(diffs[0]), 1.0 if diffs[0] == 0 else 0.0
+    t, p = stats.ttest_rel(candidate, incumbent)
+    return float(np.mean(diffs)), float(p)
+
+
+def _verdict(scores, features, s):
+    """keep | simplify | discard. The only place this is decided.
+
+    keep      significantly better than the best model, by a paired test
+    simplify  not distinguishable from the committed model, and smaller
+    discard   everything else
+    """
+    if s["best_scores"] is None:
         return "keep"
 
-    # A simplification is judged against the model that is actually
-    # committed, not against a better score some earlier model set. Judged
-    # against the pinned best, a chain of them walks the committed model
-    # away from the bar it is still being measured by.
-    current, current_features = s["current_valid_mae"], s["current_features"]
-    if current is None or not current_features:
+    # A keep is judged against the best model, so the bar ratchets.
+    diff, p = _paired(scores, s["best_scores"])
+    if p is not None and p < ALPHA and diff < 0:
+        return "keep"
+
+    # A simplification is judged against the model actually committed, on
+    # how much it costs rather than on whether the cost is detectable.
+    if s["simplify_chain"] >= MAX_SIMPLIFY_CHAIN or not s["current_features"]:
         return "discard"
-    if s["simplify_chain"] >= MAX_SIMPLIFY_CHAIN:
-        return "discard"
-    if (abs(mae - current) <= KEEP_THRESHOLD
-            and features <= SIMPLIFY_RATIO * current_features):
+    cdiff, _ = _paired(scores, s["current_scores"])
+    if (cdiff is not None and cdiff <= SIMPLIFY_TOLERANCE
+            and features <= SIMPLIFY_RATIO * s["current_features"]):
         return "simplify"
     return "discard"
 
 
-def _outcome(status, mae, features, s):
+def _outcome(status, scores, mae, features, s):
     """Why the verdict came out that way, in the ledger's own terms.
 
     Computed here rather than asked of the agent: the arithmetic is
@@ -226,23 +261,30 @@ def _outcome(status, mae, features, s):
     """
     if status == "baseline":
         return "first measurement; the bar every later change must beat"
-    best, current = s["best_valid_mae"], s["current_valid_mae"]
-    if best is None:
+    if s["best_scores"] is None:
         return "nothing to compare against"
-    margin = best - mae
+
+    best = s["best_valid_mae"]
+    diff, p = _paired(scores, s["best_scores"])
     if status == "keep":
-        return f"beat {best:.4f} by {margin:+.4f}, over the {KEEP_THRESHOLD} bar"
+        return (f"paired t-test over the five splits against {best:.4f}: "
+                f"mean difference {diff:+.4f}, p={p:.4f} — better on the same "
+                f"molecules, not just on average")
     if status == "simplify":
-        return (f"within noise of the committed {current:.4f} "
-                f"({current - mae:+.4f}) using {features} features against "
-                f"{s['current_features']}; kept as a simplification")
+        cdiff, cp = _paired(scores, s["current_scores"])
+        return (f"costs {cdiff:+.4f} against the committed "
+                f"{s['current_valid_mae']:.4f} (paired p={cp:.3f}), inside the "
+                f"{SIMPLIFY_TOLERANCE} tolerance, at {features} features "
+                f"against {s['current_features']}; kept as a simplification")
     if s["simplify_chain"] >= MAX_SIMPLIFY_CHAIN and features < (s["current_features"] or 0):
         return (f"smaller, but {MAX_SIMPLIFY_CHAIN} simplifications have run "
                 f"back to back; the next keep has to come from a better score")
-    if margin > 0:
-        return (f"better than {best:.4f} by {margin:+.4f}, but under the "
-                f"{KEEP_THRESHOLD} bar, so indistinguishable from noise")
-    return f"worse than {best:.4f} by {-margin:.4f}"
+    if diff is not None and diff < 0:
+        return (f"mean {mae:.4f} beats {best:.4f} by {-diff:.4f}, but the "
+                f"paired t-test gives p={p:.3f}: the gain is not consistent "
+                f"across the five splits")
+    return (f"worse than {best:.4f} by {diff:+.4f} (paired p={p:.3f})"
+            if diff is not None else f"worse than {best:.4f}")
 
 
 def _append(path, header, row):
@@ -261,24 +303,35 @@ def _record(m, status, idea, hypothesis, outcome, s, agent_s):
     commit = _git("rev-parse", "--short", "HEAD")
     train_mae = f"{m['train_mae']:.6f}" if m else "0.000000"
     valid_mae = f"{m['mae']:.6f}" if m else "0.000000"
+    valid_std = f"{m['mae_std']:.6f}" if m else "0.000000"
+    per_seed = " ".join(f"{v:.6f}" for v in m["scores"]) if m else ""
     feats = str(m["n_features"]) if m else "0"
     best = s["best_valid_mae"]
+
+    # The paired test against the incumbent, recorded whatever the verdict.
+    diff, p = _paired(m["scores"], s["best_scores"]) if m else (None, None)
+    diff_s = f"{diff:+.6f}" if diff is not None else ""
+    p_s = f"{p:.4f}" if p is not None else ""
+
     f = lambda k: f"{m[k]:.1f}" if m else "0.0"
     _append(
         RESULTS,
-        ["commit", "train_mae", "valid_mae", "n_features", "status", "idea",
-         "hypothesis", "outcome"],
-        [commit, train_mae, valid_mae, feats, status, idea, hypothesis, outcome],
+        ["commit", "train_mae", "valid_mae", "valid_std", "n_features",
+         "status", "paired_diff", "p_value", "idea", "hypothesis", "outcome"],
+        [commit, train_mae, valid_mae, valid_std, feats, status,
+         diff_s, p_s, idea, hypothesis, outcome],
     )
     _append(
         LOG,
-        ["timestamp", "commit", "train_mae", "valid_mae", "n_features",
-         "best_valid_mae", "best_commit", "keeps", "status", "agent_s",
+        ["timestamp", "commit", "train_mae", "valid_mae", "valid_std",
+         "valid_maes", "n_features", "best_valid_mae", "best_commit",
+         "paired_diff", "p_value", "keeps", "status", "agent_s",
          "featurize_s", "fit_s", "predict_s", "score_s", "iteration_s",
          "idea", "hypothesis", "outcome"],
         [datetime.now().isoformat(timespec="seconds"), commit, train_mae,
-         valid_mae, feats, f"{best:.6f}" if best else "",
-         s["best_commit"] or "", s["keeps"], status,
+         valid_mae, valid_std, per_seed, feats,
+         f"{best:.6f}" if best else "", s["best_commit"] or "",
+         diff_s, p_s, s["keeps"], status,
          f"{agent_s:.1f}", f("featurize_seconds"), f("fit_seconds"),
          f("predict_seconds"), f("seconds"),
          f"{agent_s + (m['seconds'] if m else 0):.1f}",
@@ -309,12 +362,13 @@ def main():
         print("no state — scoring the baseline first", flush=True)
         train = _load_train()
         m = prepare.run_validation(train.featurize, train.make_model)
-        s.update(best_valid_mae=m["mae"],
+        s.update(best_valid_mae=m["mae"], best_scores=m["scores"],
                  best_commit=_git("rev-parse", "--short", "HEAD"),
-                 current_valid_mae=m["mae"],
+                 current_valid_mae=m["mae"], current_scores=m["scores"],
                  current_features=m["n_features"])
         _record(m, "baseline", "baseline as committed", "",
-                _outcome("baseline", m["mae"], m["n_features"], s), s, 0.0)
+                _outcome("baseline", m["scores"], m["mae"],
+                         m["n_features"], s), s, 0.0)
         _save_state(s)
         print(f"  BASELINE valid_mae {m['mae']:.4f}  "
               f"train_mae {m['train_mae']:.4f}")
@@ -379,19 +433,21 @@ def main():
         finally:
             signal.alarm(0)
 
-        status = _verdict(m["mae"], m["n_features"], s)
-        outcome = _outcome(status, m["mae"], m["n_features"], s)
+        status = _verdict(m["scores"], m["n_features"], s)
+        outcome = _outcome(status, m["scores"], m["mae"], m["n_features"], s)
 
         if status in ("keep", "simplify"):
             _git("add", "-A", "train.py")
             _git("commit", "-q", "-m", idea)
             commit = _git("rev-parse", "--short", "HEAD")
-            # The bar ratchets down only. The committed model's own score
-            # moves with every accepted change, and is what a later
-            # simplification is judged against.
+            # The bar ratchets down only. The committed model's own scores
+            # move with every accepted change, and are what a later
+            # simplification is tested against.
             if s["best_valid_mae"] is None or m["mae"] < s["best_valid_mae"]:
                 s["best_valid_mae"], s["best_commit"] = m["mae"], commit
+                s["best_scores"] = m["scores"]
             s["current_valid_mae"] = m["mae"]
+            s["current_scores"] = m["scores"]
             s["current_features"] = m["n_features"]
             s["simplify_chain"] = s["simplify_chain"] + 1 if status == "simplify" else 0
             s["keeps"] += 1

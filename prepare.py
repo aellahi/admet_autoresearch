@@ -82,8 +82,12 @@ def _score(featurize, make_model, pairs, split):
 
     return {
         "split": split,
+        # The per-seed scores, kept rather than collapsed. Two models are
+        # scored on the same five splits, so these pair up and a paired
+        # test on them is far more sensitive than comparing the means.
+        "scores": [float(v) for v in held_scores],
         "mae": float(np.mean(held_scores)),
-        "mae_std": float(np.std(held_scores)),
+        "mae_std": float(np.std(held_scores, ddof=1)) if len(held_scores) > 1 else 0.0,
         "train_mae": float(np.mean(train_scores)),
         "n_features": int(X.shape[1]),
         "peak_memory_gb": _peak_gb(),
@@ -120,6 +124,7 @@ def format_summary(m):
         "---",
         f"{split}_mae:         {m['mae']:.6f}",
         f"{split}_mae_std:     {m['mae_std']:.6f}",
+        f"per_seed:         {' '.join(f'{v:.4f}' for v in m['scores'])}",
         f"train_mae:        {m['train_mae']:.6f}",
         f"n_features:       {m['n_features']}",
         f"peak_memory_gb:   {m['peak_memory_gb']:.2f}",
