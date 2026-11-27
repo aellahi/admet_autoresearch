@@ -19,10 +19,11 @@ import argparse
 import importlib
 import json
 import os
-import time
 import shutil
+import signal
 import subprocess
 import sys
+import time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +37,9 @@ KEEP_THRESHOLD = 0.03
 # fewer is kept as a simplification. Same accuracy from less model is a win,
 # and it is not a claim of improvement, so it cannot bank noise.
 SIMPLIFY_RATIO = 0.75
+# Whole-iteration budget: the agent's thinking and the scoring share it.
+# Overrun is logged as a crash and the edit is reverted.
+ITERATION_SECONDS = 3600
 
 RUNS_DIR = Path(".runs")
 LOG = RUNS_DIR / "log.tsv"
@@ -94,20 +98,31 @@ def _claude_bin():
     return str(bundles[-1]) if bundles else None
 
 
-def _spawn_agent(model, effort, iteration):
-    """Let an agent edit train.py. Returns its one-line description."""
+class Overran(Exception):
+    """The iteration used its whole budget."""
+
+
+def _alarm(signum, frame):
+    raise Overran("scoring ran past the iteration budget")
+
+
+def _spawn_agent(model, effort, iteration, budget):
+    """Let an agent edit train.py. Returns idea, hypothesis, seconds."""
     binary = _claude_bin()
     if not binary:
         raise SystemExit(
             "No claude binary found. Install the CLI, or set CLAUDE_BIN to one."
         )
-    # No timeout. A slow agent is a slow agent, not a failure.
     t0 = time.time()
-    result = subprocess.run(
-        [binary, "-p", PROMPT.format(ledger=_ledger()), "--settings", SETTINGS,
-         "--model", model, "--effort", effort],
-        capture_output=True, text=True, stdin=subprocess.DEVNULL,
-    )
+    try:
+        result = subprocess.run(
+            [binary, "-p", PROMPT.format(ledger=_ledger()), "--settings",
+             SETTINGS, "--model", model, "--effort", effort],
+            capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            timeout=budget,
+        )
+    except subprocess.TimeoutExpired:
+        raise Overran(f"the agent ran past the {budget:.0f}s budget")
     agent_seconds = time.time() - t0
     out = (result.stdout or "") + (result.stderr or "")
 
@@ -239,6 +254,8 @@ def main():
     ap.add_argument("--model", default="sonnet")
     ap.add_argument("--effort", default="high",
                     choices=["low", "medium", "high", "xhigh", "max"])
+    ap.add_argument("--time-limit", type=int, default=ITERATION_SECONDS,
+                    help="seconds per iteration, agent and scoring together")
     args = ap.parse_args()
 
     best, keeps, best_features = _load_state()
@@ -261,11 +278,21 @@ def main():
     for i in range(1, args.iterations + 1):
         print(f"\n=== iteration {i} of {args.iterations} ===", flush=True)
 
+        started = time.time()
         if args.no_agent:
             idea, hypothesis, agent_s = "(no-agent: scoring as it stands)", "", 0.0
         else:
             before = Path("train.py").read_text()
-            idea, hypothesis, agent_s = _spawn_agent(args.model, args.effort, i)
+            try:
+                idea, hypothesis, agent_s = _spawn_agent(
+                    args.model, args.effort, i, args.time_limit
+                )
+            except Overran as exc:
+                _git("checkout", "--", "train.py")
+                _record(None, "crash", "(agent overran)", "", str(exc),
+                        best, keeps, args.time_limit)
+                print(f"  OVERRAN -- {exc}; reverted")
+                continue
             if Path("train.py").read_text() == before:
                 print(f"  no change to train.py -- {idea}")
                 _record(None, "no-change", idea, hypothesis,
@@ -275,7 +302,11 @@ def main():
             if hypothesis:
                 print(f"    expects: {hypothesis}")
 
-        # Everything below here runs with the agent gone.
+        # Everything below here runs with the agent gone. Whatever is left
+        # of the iteration's budget is the scoring's to use.
+        remaining = max(1, int(args.time_limit - (time.time() - started)))
+        signal.signal(signal.SIGALRM, _alarm)
+        signal.alarm(remaining)
         try:
             train = _load_train()
             m = prepare.run_validation(train.featurize, train.make_model)
@@ -287,6 +318,8 @@ def main():
                     best, keeps, agent_s)
             print("  CRASH -- reverted")
             continue
+        finally:
+            signal.alarm(0)
 
         prev_best, prev_features = best, best_features
         status = _verdict(m["mae"], m["n_features"], best, best_features)
