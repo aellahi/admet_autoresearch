@@ -103,6 +103,14 @@ class Overran(Exception):
     """The iteration used its whole budget."""
 
 
+class AgentFailed(Exception):
+    """The agent call came back as an error. One iteration lost, not the run."""
+
+
+# How many agent calls may fail back to back before the campaign gives up.
+MAX_CONSECUTIVE_FAILURES = 8
+
+
 def _alarm(signum, frame):
     raise Overran("scoring ran past the iteration budget")
 
@@ -136,10 +144,11 @@ def _spawn_agent(model, effort, iteration, budget):
             "or point CLAUDE_BIN at a CLI that is."
         )
     if "API Error" in out:
-        # Surface it rather than reporting a silent "no change". Drug-property
-        # work sometimes trips the bio safeguards; --model picks another.
+        # Recoverable. Drug-property work intermittently trips the bio
+        # safeguards on every model we can use, so a flagged call costs one
+        # iteration rather than the campaign.
         first = next(l for l in out.splitlines() if "API Error" in l)
-        raise SystemExit(f"Agent call failed:\n  {first.strip()[:300]}")
+        raise AgentFailed(first.strip()[:200])
 
     idea, hypothesis = "(no description given)", ""
     for line in reversed(out.splitlines()):
@@ -274,7 +283,7 @@ def main():
                 best, keeps, 0.0)
         _save_state(best, keeps, best_features)
         print(f"  BASELINE valid_mae {best:.4f}  train_mae {m['train_mae']:.4f}")
-    kept_here = 0
+    kept_here, failures = 0, 0
 
     for i in range(1, args.iterations + 1):
         print(f"\n=== iteration {i} of {args.iterations} ===", flush=True)
@@ -288,11 +297,24 @@ def main():
                 idea, hypothesis, agent_s = _spawn_agent(
                     args.model, args.effort, i, args.time_limit
                 )
+                failures = 0
             except Overran as exc:
                 _git("checkout", "--", "train.py")
                 _record(None, "crash", "(agent overran)", "", str(exc),
                         best, keeps, args.time_limit)
                 print(f"  OVERRAN -- {exc}; reverted")
+                continue
+            except AgentFailed as exc:
+                failures += 1
+                _git("checkout", "--", "train.py")
+                _record(None, "api-error", "(agent call failed)", "",
+                        str(exc), best, keeps, 0.0)
+                print(f"  API ERROR ({failures} in a row) -- {exc}")
+                if failures >= MAX_CONSECUTIVE_FAILURES:
+                    print(f"\nStopping: {failures} agent calls failed back to "
+                          f"back. The campaign is resumable -- rerun when the "
+                          f"calls go through again.")
+                    break
                 continue
             if Path("train.py").read_text() == before:
                 print(f"  no change to train.py -- {idea}")

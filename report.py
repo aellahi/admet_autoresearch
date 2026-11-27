@@ -50,7 +50,7 @@ def build():
         status = r.get("status", "")
         valid = _f(r.get("valid_mae"))
         train = _f(r.get("train_mae"))
-        scored = status not in ("crash", "no-change")
+        scored = status not in ("crash", "no-change", "api-error")
         # The bar moves only on a kept change, and only downward -- the same
         # ratchet runner.py applies. A discarded run can score lower without
         # becoming the bar.
@@ -103,7 +103,8 @@ def build():
         "task": "Caco2_Wang",
         "iterations": len(experiments),
         "kept": sum(1 for e in experiments if e["kept"] and e["status"] != "baseline"),
-        "crashes": sum(1 for e in experiments if e["status"] == "crash"),
+        "crashes": sum(1 for e in experiments
+                       if e["status"] in ("crash", "api-error")),
         "baseline": baseline,
         "baseline_mae": baseline["valid_mae"],
         "best_mae": best,
