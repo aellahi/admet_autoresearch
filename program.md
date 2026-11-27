@@ -31,8 +31,10 @@ train only. Fitting on the held-out split is leakage and invalidates the run.
 
 ## How to choose
 
-`results.tsv` is every experiment so far: `train_mae`, `valid_mae`, whether
-it was kept, and what it tried. Read it first and do not repeat a failure.
+The ledger of every experiment so far is in your prompt: for each one, the
+hypothesis, what was changed, `train_mae`, `valid_mae`, the feature count and
+whether it was kept. Read it before deciding. Do not repeat a failure, and
+build on what held.
 
 `train_mae` is a diagnostic, never a target:
 
@@ -41,10 +43,15 @@ it was kept, and what it tried. Read it first and do not repeat a failure.
 - both low and close → suspect leakage, not success
 
 The validation set is 91 molecules, so a difference below **0.03 MAE** is
-noise. `runner.py` enforces that; you do not need to.
+noise. `runner.py` enforces the rule; you do not apply it yourself:
 
-Simpler is better when scores are equal. Removing something for the same
-result is a win.
+- beats the best by **more than 0.03** → `keep`
+- within 0.03 of the best, using **three quarters of the features or fewer**
+  → `simplify`, also kept. Same accuracy from a smaller model is a win.
+- anything else → `discard`, and your edit is reverted
+
+So a change that merely ties is not enough. Either beat the bar, or hold the
+score with markedly less model.
 
 ## Constraints
 
