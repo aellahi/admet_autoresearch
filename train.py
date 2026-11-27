@@ -6,14 +6,21 @@ unfitted sklearn-style regressor. Everything else is in prepare.py.
 
 import numpy as np
 from rdkit import Chem, RDLogger
-from rdkit.Chem import rdFingerprintGenerator
+from rdkit.Chem import Descriptors
 from sklearn.ensemble import RandomForestRegressor
 
 import prepare
 
 RDLogger.DisableLog("rdApp.*")
 
-_fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+_descriptors = [fn for _, fn in Descriptors.descList]
+
+
+def _describe(mol, fn):
+    try:
+        return float(fn(mol))
+    except Exception:
+        return 0.0
 
 
 def featurize(smiles):
@@ -22,10 +29,12 @@ def featurize(smiles):
     for smi in smiles:
         mol = Chem.MolFromSmiles(smi)
         rows.append(
-            np.zeros(2048, dtype=np.float32) if mol is None
-            else np.array(_fpgen.GetFingerprint(mol), dtype=np.float32)
+            np.zeros(len(_descriptors)) if mol is None
+            else np.array([_describe(mol, fn) for fn in _descriptors])
         )
-    return np.vstack(rows)
+    X = np.nan_to_num(np.vstack(rows), nan=0.0, posinf=1e10, neginf=-1e10)
+    # Some descriptors (e.g. Ipc) can exceed the float32 range.
+    return np.clip(X, -1e10, 1e10).astype(np.float32)
 
 
 def make_model(seed):
