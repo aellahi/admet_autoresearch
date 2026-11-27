@@ -45,16 +45,22 @@ failure, and build on what held.
 - both high → bias; richer features or more capacity
 - both low and close → suspect leakage, not success
 
-The validation set is 91 molecules, so a difference below **0.03 MAE** is
-noise. `runner.py` enforces the rule; you do not apply it yourself:
+Your change is scored on **five validation splits**, each a different 91
+molecules. The best model has been scored on the same five. `runner.py`
+compares the two sets with a **paired t-test** and applies the rule itself:
 
-- beats the best by **more than 0.03** → `keep`
-- within 0.03 of the best, using **three quarters of the features or fewer**
-  → `simplify`, also kept. Same accuracy from a smaller model is a win.
+- **significantly better** (p < 0.05) across the five splits → `keep`
+- **costs less than 0.01** against the committed model, using three quarters
+  of its features or fewer → `simplify`, also kept
 - anything else → `discard`, and your edit is reverted
 
-So a change that merely ties is not enough. Either beat the bar, or hold the
-score with markedly less model.
+What matters is consistency, not the average. A change that wins on all five
+splits by 0.015 is kept. A change that wins by 0.05 on two splits and loses
+on three is not, however good its mean looks.
+
+The ledger gives you `valid_std`, the spread across those five, and
+`p_value` from the test. A large `valid_std` means the splits disagree about
+your model, which is itself worth reading.
 
 ## Constraints
 
