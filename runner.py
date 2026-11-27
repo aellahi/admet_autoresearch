@@ -38,6 +38,10 @@ KEEP_THRESHOLD = 0.03
 # fewer is kept as a simplification. Same accuracy from less model is a win,
 # and it is not a claim of improvement, so it cannot bank noise.
 SIMPLIFY_RATIO = 0.75
+# How many simplifications may be accepted back to back. Each one is judged
+# against the model before it, so a long chain can still travel a long way;
+# a keep has to intervene before shrinking resumes.
+MAX_SIMPLIFY_CHAIN = 3
 # Whole-iteration budget: the agent's thinking and the scoring share it.
 # Overrun is logged as a crash and the edit is reverted.
 ITERATION_SECONDS = 3600
@@ -169,33 +173,51 @@ def _load_train():
     return train
 
 
+DEFAULT_STATE = {
+    "best_valid_mae": None,    # best ever kept: the bar a keep must beat
+    "best_commit": None,       # the commit that achieved it, so it is findable
+    "current_valid_mae": None, # what the committed model scores right now
+    "current_features": None,
+    "simplify_chain": 0,
+    "keeps": 0,
+}
+
+
 def _load_state():
-    """The best score survives between invocations, so a campaign resumes."""
+    """Campaign state survives between invocations, so a run resumes."""
+    s = dict(DEFAULT_STATE)
     if STATE.exists():
-        s = json.loads(STATE.read_text())
-        return s.get("best_valid_mae"), s.get("keeps", 0), s.get("best_features")
-    return None, 0, None
+        s.update(json.loads(STATE.read_text()))
+    return s
 
 
-def _save_state(best, keeps, features):
+def _save_state(s):
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    STATE.write_text(json.dumps(
-        {"best_valid_mae": best, "keeps": keeps, "best_features": features},
-        indent=2,
-    ))
+    STATE.write_text(json.dumps(s, indent=2))
 
 
-def _verdict(mae, features, best, best_features):
+def _verdict(mae, features, s):
     """keep | simplify | discard. The only place this is decided."""
+    best = s["best_valid_mae"]
     if best is None or best - mae > KEEP_THRESHOLD:
         return "keep"
-    same_score = abs(mae - best) <= KEEP_THRESHOLD
-    if same_score and best_features and features <= SIMPLIFY_RATIO * best_features:
+
+    # A simplification is judged against the model that is actually
+    # committed, not against a better score some earlier model set. Judged
+    # against the pinned best, a chain of them walks the committed model
+    # away from the bar it is still being measured by.
+    current, current_features = s["current_valid_mae"], s["current_features"]
+    if current is None or not current_features:
+        return "discard"
+    if s["simplify_chain"] >= MAX_SIMPLIFY_CHAIN:
+        return "discard"
+    if (abs(mae - current) <= KEEP_THRESHOLD
+            and features <= SIMPLIFY_RATIO * current_features):
         return "simplify"
     return "discard"
 
 
-def _outcome(status, mae, features, best, best_features):
+def _outcome(status, mae, features, s):
     """Why the verdict came out that way, in the ledger's own terms.
 
     Computed here rather than asked of the agent: the arithmetic is
@@ -204,14 +226,19 @@ def _outcome(status, mae, features, best, best_features):
     """
     if status == "baseline":
         return "first measurement; the bar every later change must beat"
+    best, current = s["best_valid_mae"], s["current_valid_mae"]
     if best is None:
         return "nothing to compare against"
     margin = best - mae
     if status == "keep":
-        return (f"beat {best:.4f} by {margin:+.4f}, over the {KEEP_THRESHOLD} bar")
+        return f"beat {best:.4f} by {margin:+.4f}, over the {KEEP_THRESHOLD} bar"
     if status == "simplify":
-        return (f"within noise of {best:.4f} ({margin:+.4f}) using {features} "
-                f"features against {best_features}; kept as a simplification")
+        return (f"within noise of the committed {current:.4f} "
+                f"({current - mae:+.4f}) using {features} features against "
+                f"{s['current_features']}; kept as a simplification")
+    if s["simplify_chain"] >= MAX_SIMPLIFY_CHAIN and features < (s["current_features"] or 0):
+        return (f"smaller, but {MAX_SIMPLIFY_CHAIN} simplifications have run "
+                f"back to back; the next keep has to come from a better score")
     if margin > 0:
         return (f"better than {best:.4f} by {margin:+.4f}, but under the "
                 f"{KEEP_THRESHOLD} bar, so indistinguishable from noise")
@@ -230,26 +257,28 @@ def _append(path, header, row):
         fh.write("\t".join(str(c).replace("\t", " ") for c in row) + "\n")
 
 
-def _record(m, status, idea, hypothesis, outcome, best, keeps, agent_s):
+def _record(m, status, idea, hypothesis, outcome, s, agent_s):
     commit = _git("rev-parse", "--short", "HEAD")
     train_mae = f"{m['train_mae']:.6f}" if m else "0.000000"
     valid_mae = f"{m['mae']:.6f}" if m else "0.000000"
     feats = str(m["n_features"]) if m else "0"
+    best = s["best_valid_mae"]
     f = lambda k: f"{m[k]:.1f}" if m else "0.0"
     _append(
         RESULTS,
-        ["train_mae", "valid_mae", "n_features", "status", "idea",
+        ["commit", "train_mae", "valid_mae", "n_features", "status", "idea",
          "hypothesis", "outcome"],
-        [train_mae, valid_mae, feats, status, idea, hypothesis, outcome],
+        [commit, train_mae, valid_mae, feats, status, idea, hypothesis, outcome],
     )
     _append(
         LOG,
         ["timestamp", "commit", "train_mae", "valid_mae", "n_features",
-         "best_valid_mae", "keeps", "status", "agent_s", "featurize_s",
-         "fit_s", "predict_s", "score_s", "iteration_s", "idea",
-         "hypothesis", "outcome"],
+         "best_valid_mae", "best_commit", "keeps", "status", "agent_s",
+         "featurize_s", "fit_s", "predict_s", "score_s", "iteration_s",
+         "idea", "hypothesis", "outcome"],
         [datetime.now().isoformat(timespec="seconds"), commit, train_mae,
-         valid_mae, feats, f"{best:.6f}" if best else "", keeps, status,
+         valid_mae, feats, f"{best:.6f}" if best else "",
+         s["best_commit"] or "", s["keeps"], status,
          f"{agent_s:.1f}", f("featurize_seconds"), f("fit_seconds"),
          f("predict_seconds"), f("seconds"),
          f"{agent_s + (m['seconds'] if m else 0):.1f}",
@@ -268,21 +297,27 @@ def main():
                     help="seconds per iteration, agent and scoring together")
     args = ap.parse_args()
 
-    best, keeps, best_features = _load_state()
-    if best is not None:
-        print(f"resuming — best valid_mae {best:.6f}, {keeps} kept so far")
+    s = _load_state()
+    if s["best_valid_mae"] is not None:
+        print(f"resuming — best {s['best_valid_mae']:.6f} "
+              f"({s['best_commit'] or 'commit unrecorded'}), "
+              f"committed model {s['current_valid_mae']:.6f} at "
+              f"{s['current_features']} features, {s['keeps']} kept")
     else:
         # Score train.py as it stands before any agent touches it, so the
         # bar is the baseline rather than whatever the first agent wrote.
         print("no state — scoring the baseline first", flush=True)
         train = _load_train()
         m = prepare.run_validation(train.featurize, train.make_model)
-        best, keeps, best_features = m["mae"], 0, m["n_features"]
+        s.update(best_valid_mae=m["mae"],
+                 best_commit=_git("rev-parse", "--short", "HEAD"),
+                 current_valid_mae=m["mae"],
+                 current_features=m["n_features"])
         _record(m, "baseline", "baseline as committed", "",
-                _outcome("baseline", best, best_features, None, None),
-                best, keeps, 0.0)
-        _save_state(best, keeps, best_features)
-        print(f"  BASELINE valid_mae {best:.4f}  train_mae {m['train_mae']:.4f}")
+                _outcome("baseline", m["mae"], m["n_features"], s), s, 0.0)
+        _save_state(s)
+        print(f"  BASELINE valid_mae {m['mae']:.4f}  "
+              f"train_mae {m['train_mae']:.4f}")
     kept_here, failures = 0, 0
 
     for i in range(1, args.iterations + 1):
@@ -301,14 +336,14 @@ def main():
             except Overran as exc:
                 _git("checkout", "--", "train.py")
                 _record(None, "crash", "(agent overran)", "", str(exc),
-                        best, keeps, args.time_limit)
+                        s, args.time_limit)
                 print(f"  OVERRAN -- {exc}; reverted")
                 continue
             except AgentFailed as exc:
                 failures += 1
                 _git("checkout", "--", "train.py")
                 _record(None, "api-error", "(agent call failed)", "",
-                        str(exc), best, keeps, 0.0)
+                        str(exc), s, 0.0)
                 print(f"  API ERROR ({failures} in a row) -- {exc}")
                 if failures >= MAX_CONSECUTIVE_FAILURES:
                     print(f"\nStopping: {failures} agent calls failed back to "
@@ -319,7 +354,7 @@ def main():
             if Path("train.py").read_text() == before:
                 print(f"  no change to train.py -- {idea}")
                 _record(None, "no-change", idea, hypothesis,
-                        "the agent left train.py untouched", best, keeps, agent_s)
+                        "the agent left train.py untouched", s, agent_s)
                 continue
             print(f"  agent: {idea}  [{agent_s:.0f}s thinking]")
             if hypothesis:
@@ -338,34 +373,40 @@ def main():
             _git("checkout", "--", "train.py")
             _record(None, "crash", idea, hypothesis,
                     f"raised {type(exc).__name__}: {str(exc)[:120]}",
-                    best, keeps, agent_s)
+                    s, agent_s)
             print("  CRASH -- reverted")
             continue
         finally:
             signal.alarm(0)
 
-        prev_best, prev_features = best, best_features
-        status = _verdict(m["mae"], m["n_features"], best, best_features)
+        status = _verdict(m["mae"], m["n_features"], s)
+        outcome = _outcome(status, m["mae"], m["n_features"], s)
+
         if status in ("keep", "simplify"):
-            # best only ever ratchets down. A simplify keeps the smaller
-            # model but must not raise the bar, or a chain of them walks
-            # the score back toward the baseline one noise step at a time.
-            best = min(best, m["mae"]) if best is not None else m["mae"]
-            best_features = m["n_features"]
-            keeps, kept_here = keeps + 1, kept_here + 1
             _git("add", "-A", "train.py")
             _git("commit", "-q", "-m", idea)
+            commit = _git("rev-parse", "--short", "HEAD")
+            # The bar ratchets down only. The committed model's own score
+            # moves with every accepted change, and is what a later
+            # simplification is judged against.
+            if s["best_valid_mae"] is None or m["mae"] < s["best_valid_mae"]:
+                s["best_valid_mae"], s["best_commit"] = m["mae"], commit
+            s["current_valid_mae"] = m["mae"]
+            s["current_features"] = m["n_features"]
+            s["simplify_chain"] = s["simplify_chain"] + 1 if status == "simplify" else 0
+            s["keeps"] += 1
+            kept_here += 1
         else:
             _git("checkout", "--", "train.py")
 
-        outcome = _outcome(status, m["mae"], m["n_features"],
-                           prev_best, prev_features)
         print(f"    {outcome}")
-        _record(m, status, idea, hypothesis, outcome, best, keeps, agent_s)
-        _save_state(best, keeps, best_features)
+        _record(m, status, idea, hypothesis, outcome, s, agent_s)
+        _save_state(s)
         print(f"  {status.upper():8} valid_mae {m['mae']:.4f}  "
               f"train_mae {m['train_mae']:.4f}  "
-              f"features {m['n_features']}  best {best:.4f}")
+              f"features {m['n_features']}  "
+              f"best {s['best_valid_mae']:.4f}  "
+              f"committed {s['current_valid_mae']:.4f}")
         print(f"    {agent_s + m['seconds']:.0f}s total — "
               f"{agent_s:.0f}s agent, {m['featurize_seconds']:.0f}s featurize, "
               f"{m['fit_seconds']:.0f}s fit, {m['predict_seconds']:.0f}s predict")
@@ -376,11 +417,14 @@ def main():
         except Exception as exc:
             print(f"    (report.json not rebuilt: {exc})")
 
-    if best is None:
+    if s["best_valid_mae"] is None:
         print("\nDone. Nothing scored.")
     else:
         print(f"\nDone. {kept_here} kept of {args.iterations} this run, "
-              f"{keeps} in the campaign. Best valid_mae {best:.6f}")
+              f"{s['keeps']} in the campaign.\n"
+              f"Best valid_mae {s['best_valid_mae']:.6f} at "
+              f"{s['best_commit']}; committed model scores "
+              f"{s['current_valid_mae']:.6f}.")
 
 
 if __name__ == "__main__":

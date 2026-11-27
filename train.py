@@ -13,13 +13,17 @@ import prepare
 
 RDLogger.DisableLog("rdApp.*")
 
-# A compact hand-picked set covering size, lipophilicity, polarity and
-# H-bonding.
+# A compact hand-picked set covering size, lipophilicity, polarity, H-bonding,
+# flexibility, shape and charge distribution.
 _selected = {
     "MolWt", "MolLogP", "TPSA",
-    "NumHDonors",
-    "BCUT2D_LOGPHI",
+    "NumHDonors", "NumHAcceptors",
+    "NumRotatableBonds", "FractionCSP3", "NumAromaticRings",
+    "qed", "HallKierAlpha",
+    "MinPartialCharge", "MinEStateIndex",
+    "BCUT2D_LOGPHI", "BCUT2D_LOGPLOW",
 }
+_descriptors = [fn for name, fn in Descriptors.descList if name in _selected]
 
 
 def _describe(mol, fn):
@@ -51,35 +55,17 @@ _base_patterns = [
 ]
 # Quaternary or already protonated nitrogen, excluding N-oxides.
 _cation_pattern = Chem.MolFromSmarts("[$([NX4+]),$([nX3+]);!$([#7+]-[O-])]")
+_N_IONIZATION = 4
 
 
 def _ionization(mol):
-    """Approximate net charge."""
+    """Acid and base counts, approximate net charge, zwitterion flag."""
     acids = sum(len(mol.GetSubstructMatches(p)) for p in _acid_patterns)
     bases = sum(len(mol.GetSubstructMatches(p)) for p in _base_patterns)
     cations = len(mol.GetSubstructMatches(_cation_pattern))
-    return [bases + cations - acids]
-
-
-# Fixed, not fitted: extra polar-area penalty (square angstroms) per donor,
-# and polar-area credit per unit of charge-penalised logP.
-_DONOR_WEIGHT = 20.0
-_LOGP_WEIGHT = 20.0
-_N_COMPACT = 3
-
-
-def _compact(mol):
-    """Size, net polarity (polar area offset by logP), BCUT logP."""
-    d = {fn_name: _describe(mol, fn)
-         for fn_name, fn in Descriptors.descList if fn_name in _selected}
-    charge = _ionization(mol)[0]
-    polarity = d["TPSA"] + _DONOR_WEIGHT * d["NumHDonors"]
-    lipophilicity = d["MolLogP"] - abs(charge)
-    return [
-        d["MolWt"],
-        polarity - _LOGP_WEIGHT * lipophilicity,
-        d["BCUT2D_LOGPHI"],
-    ]
+    positive = bases + cations
+    return [acids, bases, positive - acids,
+            float(acids > 0 and positive > 0)]
 
 
 def featurize(smiles):
@@ -88,7 +74,10 @@ def featurize(smiles):
     for smi in smiles:
         mol = Chem.MolFromSmiles(smi)
         rows.append(
-            np.zeros(_N_COMPACT) if mol is None else np.array(_compact(mol))
+            np.zeros(len(_descriptors) + _N_IONIZATION) if mol is None
+            else np.array(
+                [_describe(mol, fn) for fn in _descriptors] + _ionization(mol)
+            )
         )
     X = np.nan_to_num(np.vstack(rows), nan=0.0, posinf=1e10, neginf=-1e10)
     # Guard against descriptor values too large for float32.
