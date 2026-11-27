@@ -58,8 +58,12 @@ score with markedly less model.
 
 ## Constraints
 
-4 cores, 8 GB RAM. Keep `n_jobs` at 4 or below. A run over ten minutes is
-killed and counted as a failure.
+4 cores, 8 GB RAM. Keep `n_jobs` at 4 or below.
+
+Nothing is killed for being slow, but time is logged per phase. Featurising
+currently costs far more than fitting — about 25 seconds against 2 — so a
+featurizer that calls something expensive per molecule will dominate the
+run. Worth knowing before you reach for a conformer generator.
 
 ## When you are done
 

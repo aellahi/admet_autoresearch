@@ -19,7 +19,6 @@ import pandas as pd
 
 SPLITS = Path("data/splits")
 SEEDS = (1, 2, 3, 4, 5)
-TIMEOUT_SECONDS = 600
 
 # Named here only so audit.py can import it. Nothing in the validation path
 # below refers to it.
@@ -50,24 +49,36 @@ def _train(seed):
 
 
 def _score(featurize, make_model, pairs, split):
-    """pairs: [(seed, train_df, held_df), ...], one per seed."""
+    """pairs: [(seed, train_df, held_df), ...], one per seed.
+
+    Times three phases separately, summed over the seeds: turning SMILES
+    into features, fitting the model, and predicting plus scoring.
+    """
     start = time.time()
     held_scores, train_scores = [], []
+    t_featurize = t_fit = t_predict = 0.0
 
     for seed, train, held in pairs:
+        t0 = time.time()
         X = featurize(list(train["Drug"]))
         _check(X, len(train), "train features")
         X_held = featurize(list(held["Drug"]))
         _check(X_held, len(held), f"{split} features")
+        t_featurize += time.time() - t0
 
         model = make_model(seed)
+        t0 = time.time()
         model.fit(X, train["Y"].values)
+        t_fit += time.time() - t0
+
+        t0 = time.time()
         held_scores.append(
             float(np.mean(np.abs(model.predict(X_held) - held["Y"].values)))
         )
         train_scores.append(
             float(np.mean(np.abs(model.predict(X) - train["Y"].values)))
         )
+        t_predict += time.time() - t0
 
     return {
         "split": split,
@@ -76,6 +87,9 @@ def _score(featurize, make_model, pairs, split):
         "train_mae": float(np.mean(train_scores)),
         "n_features": int(X.shape[1]),
         "peak_memory_gb": _peak_gb(),
+        "featurize_seconds": t_featurize,
+        "fit_seconds": t_fit,
+        "predict_seconds": t_predict,
         "seconds": time.time() - start,
     }
 
@@ -109,5 +123,8 @@ def format_summary(m):
         f"train_mae:        {m['train_mae']:.6f}",
         f"n_features:       {m['n_features']}",
         f"peak_memory_gb:   {m['peak_memory_gb']:.2f}",
+        f"featurize_s:      {m['featurize_seconds']:.1f}",
+        f"fit_s:            {m['fit_seconds']:.1f}",
+        f"predict_s:        {m['predict_seconds']:.1f}",
         f"total_seconds:    {m['seconds']:.1f}",
     ])

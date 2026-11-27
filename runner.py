@@ -19,6 +19,7 @@ import argparse
 import importlib
 import json
 import os
+import time
 import shutil
 import subprocess
 import sys
@@ -35,7 +36,6 @@ KEEP_THRESHOLD = 0.03
 # fewer is kept as a simplification. Same accuracy from less model is a win,
 # and it is not a claim of improvement, so it cannot bank noise.
 SIMPLIFY_RATIO = 0.75
-AGENT_TIMEOUT = 900
 
 RUNS_DIR = Path(".runs")
 LOG = RUNS_DIR / "log.tsv"
@@ -101,12 +101,14 @@ def _spawn_agent(model, effort, iteration):
         raise SystemExit(
             "No claude binary found. Install the CLI, or set CLAUDE_BIN to one."
         )
+    # No timeout. A slow agent is a slow agent, not a failure.
+    t0 = time.time()
     result = subprocess.run(
         [binary, "-p", PROMPT.format(ledger=_ledger()), "--settings", SETTINGS,
          "--model", model, "--effort", effort],
-        capture_output=True, text=True, timeout=AGENT_TIMEOUT,
-        stdin=subprocess.DEVNULL,
+        capture_output=True, text=True, stdin=subprocess.DEVNULL,
     )
+    agent_seconds = time.time() - t0
     out = (result.stdout or "") + (result.stderr or "")
 
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
@@ -131,7 +133,7 @@ def _spawn_agent(model, effort, iteration):
         elif s.startswith("IDEA:"):
             idea = s.split("IDEA:", 1)[1].strip()[:90]
             break
-    return idea, hypothesis
+    return idea, hypothesis, agent_seconds
 
 
 def _load_train():
@@ -203,11 +205,12 @@ def _append(path, header, row):
         fh.write("\t".join(str(c).replace("\t", " ") for c in row) + "\n")
 
 
-def _record(m, status, idea, hypothesis, outcome, best, keeps):
+def _record(m, status, idea, hypothesis, outcome, best, keeps, agent_s):
     commit = _git("rev-parse", "--short", "HEAD")
     train_mae = f"{m['train_mae']:.6f}" if m else "0.000000"
     valid_mae = f"{m['mae']:.6f}" if m else "0.000000"
     feats = str(m["n_features"]) if m else "0"
+    f = lambda k: f"{m[k]:.1f}" if m else "0.0"
     _append(
         RESULTS,
         ["train_mae", "valid_mae", "n_features", "status", "idea",
@@ -217,9 +220,14 @@ def _record(m, status, idea, hypothesis, outcome, best, keeps):
     _append(
         LOG,
         ["timestamp", "commit", "train_mae", "valid_mae", "n_features",
-         "best_valid_mae", "keeps", "status", "idea", "hypothesis", "outcome"],
+         "best_valid_mae", "keeps", "status", "agent_s", "featurize_s",
+         "fit_s", "predict_s", "score_s", "iteration_s", "idea",
+         "hypothesis", "outcome"],
         [datetime.now().isoformat(timespec="seconds"), commit, train_mae,
          valid_mae, feats, f"{best:.6f}" if best else "", keeps, status,
+         f"{agent_s:.1f}", f("featurize_seconds"), f("fit_seconds"),
+         f("predict_seconds"), f("seconds"),
+         f"{agent_s + (m['seconds'] if m else 0):.1f}",
          idea, hypothesis, outcome],
     )
 
@@ -245,7 +253,7 @@ def main():
         best, keeps, best_features = m["mae"], 0, m["n_features"]
         _record(m, "baseline", "baseline as committed", "",
                 _outcome("baseline", best, best_features, None, None),
-                best, keeps)
+                best, keeps, 0.0)
         _save_state(best, keeps, best_features)
         print(f"  BASELINE valid_mae {best:.4f}  train_mae {m['train_mae']:.4f}")
     kept_here = 0
@@ -254,16 +262,16 @@ def main():
         print(f"\n=== iteration {i} of {args.iterations} ===", flush=True)
 
         if args.no_agent:
-            idea, hypothesis = "(no-agent: scoring train.py as it stands)", ""
+            idea, hypothesis, agent_s = "(no-agent: scoring as it stands)", "", 0.0
         else:
             before = Path("train.py").read_text()
-            idea, hypothesis = _spawn_agent(args.model, args.effort, i)
+            idea, hypothesis, agent_s = _spawn_agent(args.model, args.effort, i)
             if Path("train.py").read_text() == before:
                 print(f"  no change to train.py -- {idea}")
                 _record(None, "no-change", idea, hypothesis,
-                        "the agent left train.py untouched", best, keeps)
+                        "the agent left train.py untouched", best, keeps, agent_s)
                 continue
-            print(f"  agent: {idea}")
+            print(f"  agent: {idea}  [{agent_s:.0f}s thinking]")
             if hypothesis:
                 print(f"    expects: {hypothesis}")
 
@@ -275,14 +283,19 @@ def main():
             traceback.print_exc()
             _git("checkout", "--", "train.py")
             _record(None, "crash", idea, hypothesis,
-                    f"raised {type(exc).__name__}: {str(exc)[:120]}", best, keeps)
+                    f"raised {type(exc).__name__}: {str(exc)[:120]}",
+                    best, keeps, agent_s)
             print("  CRASH -- reverted")
             continue
 
         prev_best, prev_features = best, best_features
         status = _verdict(m["mae"], m["n_features"], best, best_features)
         if status in ("keep", "simplify"):
-            best, best_features = m["mae"], m["n_features"]
+            # best only ever ratchets down. A simplify keeps the smaller
+            # model but must not raise the bar, or a chain of them walks
+            # the score back toward the baseline one noise step at a time.
+            best = min(best, m["mae"]) if best is not None else m["mae"]
+            best_features = m["n_features"]
             keeps, kept_here = keeps + 1, kept_here + 1
             _git("add", "-A", "train.py")
             _git("commit", "-q", "-m", idea)
@@ -292,11 +305,14 @@ def main():
         outcome = _outcome(status, m["mae"], m["n_features"],
                            prev_best, prev_features)
         print(f"    {outcome}")
-        _record(m, status, idea, hypothesis, outcome, best, keeps)
+        _record(m, status, idea, hypothesis, outcome, best, keeps, agent_s)
         _save_state(best, keeps, best_features)
         print(f"  {status.upper():8} valid_mae {m['mae']:.4f}  "
               f"train_mae {m['train_mae']:.4f}  "
               f"features {m['n_features']}  best {best:.4f}")
+        print(f"    {agent_s + m['seconds']:.0f}s total — "
+              f"{agent_s:.0f}s agent, {m['featurize_seconds']:.0f}s featurize, "
+              f"{m['fit_seconds']:.0f}s fit, {m['predict_seconds']:.0f}s predict")
 
     if best is None:
         print("\nDone. Nothing scored.")
