@@ -2,16 +2,16 @@
   "permissions": {
     "defaultMode": "dontAsk",
     "allow": [
-      "Bash(uv run experiment.py:*)",
       "Read(//Users/aisha/projects/admet_autoresearch/**)",
       "Edit(train.py)"
     ],
     "deny": [
+      "Bash",
       "Read(//Users/aisha/projects/admet_autoresearch/data/holdout/**)",
       "Read(//Users/aisha/.cache/admet_autoresearch/**)",
       "Read(//Users/aisha/.claude/**)",
       "Edit(prepare.py)",
-      "Edit(experiment.py)",
+      "Edit(runner.py)",
       "Edit(audit.py)",
       "Edit(setup.py)",
       "Edit(program.md)",

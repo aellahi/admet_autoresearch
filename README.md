@@ -12,11 +12,11 @@ Framework after [karpathy/autoresearch](https://github.com/karpathy/autoresearch
 | file | role | who runs it |
 | --- | --- | --- |
 | `setup.py` | Downloads the benchmark, writes the splits to disk | you, once |
+| `runner.py` | The loop. Spawns the agent, scores, keeps or reverts | you |
 | `prepare.py` | `run_validation()` and `run_audit()`. The metric. | imported |
 | `train.py` | `featurize()` and `make_model()` | the agent edits |
-| `experiment.py` | Scores validation, decides keep/discard, moves git | the agent |
 | `audit.py` | Scores the held-out test set | you, rarely |
-| `program.md` | Instructions for the agent | you edit |
+| `program.md` | The brief handed to each spawned agent | you edit |
 
 ## Quick start
 
@@ -40,27 +40,36 @@ validation process never has test labels in memory. Verified by setting
 `data/holdout` to mode `000`: validation still scored 0.435680, and
 `audit.py` failed with `PermissionError`.
 
-## Running the agent
-
-Launch it with the restricted settings, so the limits apply to that session
-and not to your own:
+## Running a campaign
 
 ```bash
-claude --settings agent-settings.json
+uv run runner.py --iterations 20
 ```
 
-Then ask it to read `program.md`. `agent-settings.json` gives that session:
+`runner.py` owns the loop. Each iteration it spawns a headless agent that
+edits `train.py` and exits; then, with the agent gone, it scores the change
+on the five validation seeds, keeps it if `valid_mae` improved by more than
+0.03, and otherwise reverts. The agent never scores, decides or commits, and
+sees the outcome only as a row in `results.tsv` on its next turn.
 
-- **one shell command**, `uv run experiment.py` — everything else is refused
-- **no network at all**, since the loop reads local CSVs and needs none
+Progress is saved in `.runs/state.json`, so a second invocation resumes the
+campaign rather than restarting it.
+
+```bash
+uv run runner.py --iterations 2 --no-agent    # score train.py as it stands
+```
+
+**Before the first run**, the spawned agent needs a signed-in CLI.
+`runner.py` looks at `$CLAUDE_BIN`, then `claude` on `PATH`, then the copy
+inside Claude Desktop — which is not signed in on its own. Install the CLI
+and sign in once, or point `CLAUDE_BIN` at one that is.
+
+`agent-settings.json` gives the spawned agent:
+
+- **no shell at all** — `Bash` is denied outright; it does not need one
+- **no network**
 - **no reads** of `data/holdout`, the audit log or `~/.claude`
 - **no edits** outside `train.py`
-
-Verify with `/sandbox`. `failIfUnavailable` means the session refuses to
-start rather than running unsandboxed, so if it launches, the sandbox is on.
-
-Run `uv sync` and `setup.py` before this, in your own session — they are the
-only steps that need network.
 
 ## Checking the audit set
 

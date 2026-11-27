@@ -1,124 +1,64 @@
 # admet_autoresearch
 
-Autonomous experimentation on TDC's Caco2_Wang permeability benchmark.
+You are one iteration of a search. Make **one** change to `train.py`, then stop.
 
-## Setup
+## The task
 
-1. **Agree on a run tag** with the user, based on today's date (e.g. `nov22`).
-   The branch `autoresearch/<tag>` must not already exist.
-2. **Create the branch**: `git checkout -b autoresearch/<tag>` from main.
-3. **Read the in-scope files**: `README.md`, `prepare.py`, `train.py`.
-4. **Verify data exists**: check `data/splits/seed1/` holds `train.csv` and
-   `valid.csv`. If not, tell the human to run `uv run setup.py`.
-5. **Initialize results.tsv** with just the header row.
-6. **Confirm and go.**
+Predict Caco-2 cell permeability from a SMILES string. Lower `valid_mae` is
+better. The baseline is an ECFP4 fingerprint into a random forest.
 
-## Experimentation
+## What you can change
 
-Run an experiment with:
+`train.py`, and only `train.py`. Two functions:
 
-```
-uv run experiment.py "what this tried"
-```
+- `featurize(smiles) -> (n, d) float32` — any RDKit representation
+- `make_model(seed)` — any scikit-learn compatible regressor
 
-It scores the current `train.py` over five seeds and then **commits or
-reverts it for you**. You do not decide what to keep and you do not commit.
+`featurize()` must return one finite row per input, handle unparseable
+SMILES, and be deterministic. `prepare.py` checks all three and the run
+fails if it does not.
 
-This is the only shell command you can run. Everything else is refused, so
-read files with your file tools rather than through the shell.
+Anything with fitted state — scaling, PCA, feature selection — must fit on
+train only. Fitting on the held-out split is leakage and invalidates the run.
 
-**What you CAN do:**
-- Modify `train.py`. `featurize()` and `make_model()` are both fair game:
-  any RDKit representation, any sklearn-compatible regressor.
+## What you cannot do
 
-**What you CANNOT do:**
-- Modify `prepare.py`, `experiment.py` or `audit.py`. They hold the data,
-  the metric and the keep/discard rule.
-- Add dependencies beyond `pyproject.toml`.
-- Run `audit.py`, or touch the test split in any other way. The audit set
-  is the human's, scored outside this loop. Using it here would destroy
-  the only unbiased measurement of your work.
+- Run anything. You have no shell. Do not try to score your own change.
+- Edit any file but `train.py`.
+- Add a package. There is no network; what is installed is what you have.
+- Touch `data/holdout`. It is the audit set, read only by the human, and
+  reading it would destroy the only unbiased measure of this work.
 
-**The goal: lowest `valid_mae`.** Lower is better.
+## How to choose
 
-**Constraints:**
-- `featurize()` must return a finite float array with one row per input,
-  handle unparseable SMILES, and be deterministic. `prepare.py` checks this.
-- Anything with fitted state (scaling, PCA, feature selection) must fit on
-  train only. Fitting on the held-out split is leakage and invalidates the run.
-- The machine has 4 cores and 8 GB RAM. Keep `n_jobs` at 4 or below.
-  `experiment.py` kills a run that exceeds 10 minutes.
-- There is no network. Everything you need is already installed; you cannot
-  add a package or download anything.
+`results.tsv` is every experiment so far: `train_mae`, `valid_mae`, whether
+it was kept, and what it tried. Read it first and do not repeat a failure.
 
-**Noise floor**: the validation set is 91 molecules. A difference below
-**0.03 MAE** on the five-seed mean is not meaningful. `experiment.py`
-enforces this; you do not need to apply it yourself.
+`train_mae` is a diagnostic, never a target:
 
-**Simplicity criterion**: all else equal, simpler is better. A small gain
-that adds ugly complexity is not worth it. Equal results from less code is
-a win — keep it.
+- `train_mae` low, `valid_mae` high → variance; regularise or simplify
+- both high → bias; richer features or more capacity
+- both low and close → suspect leakage, not success
 
-**The first run** establishes the baseline: run `train.py` unmodified.
+The validation set is 91 molecules, so a difference below **0.03 MAE** is
+noise. `runner.py` enforces that; you do not need to.
 
-## Output format
+Simpler is better when scores are equal. Removing something for the same
+result is a win.
+
+## Constraints
+
+4 cores, 8 GB RAM. Keep `n_jobs` at 4 or below. A run over ten minutes is
+killed and counted as a failure.
+
+## When you are done
+
+Stop after one edit. End your reply with:
 
 ```
----
-status:           DISCARD
-valid_mae:        <float>
-valid_mae_std:    <float>
-train_mae:        <float>
-n_features:       <int>
-peak_memory_gb:   <float>
-total_seconds:    <float>
+IDEA: <at most twelve words describing what you changed>
 ```
 
-That output is short, so read it straight from the command's output.
-
-`status` is the decision, already applied. `KEEP` means the change is
-committed; `DISCARD` means `train.py` has been reverted and the working tree
-is back where it started.
-
-**`train_mae` is a diagnostic, never a criterion.** It tells you what to try
-next, not whether something worked:
-
-- `train_mae` low, `valid_mae` high -> variance problem; regularise or simplify
-- both high -> bias problem; richer features or more capacity
-- both low and close together -> suspect leakage, not success
-
-## Results log
-
-`experiment.py` writes `results.tsv` for you. Do not edit it by hand.
-
-```
-commit	train_mae	valid_mae	status	description
-<sha>	<float>	<float>	keep	<what you changed>
-<sha>	<float>	<float>	discard	<what you changed>
-```
-
-Read it at the start of each experiment so you do not repeat yourself.
-
-## The experiment loop
-
-LOOP FOREVER:
-
-1. Read `results.tsv`: what has been tried, and what was kept.
-2. Edit `train.py` with one experimental idea.
-3. `uv run experiment.py "short description"`
-4. Read the `status` and `valid_mae` it printed.
-5. A traceback instead means a crash. Fix it, or abandon the idea after a
-   few attempts.
-6. Go to 1.
-
-There is no step where you commit, revert, or decide. `experiment.py` has
-already done it by the time you read the log. If `status` is `DISCARD` your
-edit is gone; start the next idea from the current `train.py`.
-
-**Crashes**: fix typos and missing imports; skip ideas that are
-fundamentally broken and move on. A crash is logged automatically.
-
-**NEVER STOP**: once the loop has begun, do not pause to ask whether to
-continue. The user may be asleep and expects you to work until manually
-stopped. If you run out of ideas, re-read the in-scope files, combine
-previous near-misses, or try a more radical change to the representation.
+You will not see the result. `runner.py` scores your change after you exit,
+keeps or reverts it, and the next iteration reads the outcome in
+`results.tsv`.
