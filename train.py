@@ -13,17 +13,18 @@ import prepare
 
 RDLogger.DisableLog("rdApp.*")
 
-# Skip the fr_* fragment counts (sparse) and the binned *VSA* surface-area
-# histograms: polarity, lipophilicity and size are already covered by the
-# whole-molecule descriptors. Also skip the Chi connectivity indices, Morgan
-# fingerprint densities, duplicate molecular weights, Ipc and radical count.
-_redundant = {"HeavyAtomMolWt", "ExactMolWt", "Ipc", "NumRadicalElectrons"}
-_descriptors = [
-    fn for name, fn in Descriptors.descList
-    if not name.startswith(("fr_", "Chi", "FpDensityMorgan"))
-    and "VSA" not in name
-    and name not in _redundant
-]
+# A compact hand-picked set covering size, lipophilicity, polarity, H-bonding,
+# flexibility, shape and charge distribution.
+_selected = {
+    "MolWt", "MolLogP", "MolMR", "TPSA", "LabuteASA",
+    "NumHDonors", "NumHAcceptors", "NHOHCount", "NOCount",
+    "NumRotatableBonds", "FractionCSP3", "NumAromaticRings", "RingCount",
+    "qed", "BertzCT", "BalabanJ", "HallKierAlpha", "Kappa3",
+    "MaxPartialCharge", "MinPartialCharge",
+    "MaxEStateIndex", "MinEStateIndex", "MinAbsEStateIndex",
+    "BCUT2D_MWLOW", "BCUT2D_LOGPHI", "BCUT2D_LOGPLOW", "BCUT2D_MRHI",
+}
+_descriptors = [fn for name, fn in Descriptors.descList if name in _selected]
 
 
 def _describe(mol, fn):
