@@ -28,16 +28,21 @@ def main():
         capture_output=True, text=True, check=False,
     ).stdout.strip()
 
+    # Which iteration this measures, so the progress chart can place it.
+    ledger = Path("results.tsv")
+    iteration = max(0, len(ledger.read_text().splitlines()) - 1) if ledger.exists() else 0
+
     m = prepare.run_audit(train.featurize, train.make_model)
 
     AUDIT_DIR.mkdir(parents=True, exist_ok=True)
     if not AUDIT_LOG.exists():
         AUDIT_LOG.write_text(
-            "timestamp\tcommit\ttrain_mae\ttest_mae\ttest_mae_std\tn_features\n"
+            "timestamp\tcommit\titeration\ttrain_mae\ttest_mae\t"
+            "test_mae_std\tn_features\n"
         )
     with AUDIT_LOG.open("a") as fh:
         fh.write("\t".join([
-            datetime.now().isoformat(timespec="seconds"), commit,
+            datetime.now().isoformat(timespec="seconds"), commit, str(iteration),
             f"{m['train_mae']:.6f}", f"{m['mae']:.6f}",
             f"{m['mae_std']:.6f}", str(m["n_features"]),
         ]) + "\n")
