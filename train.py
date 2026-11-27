@@ -15,10 +15,14 @@ RDLogger.DisableLog("rdApp.*")
 
 # Skip the fr_* fragment counts (sparse) and the binned *VSA* surface-area
 # histograms: polarity, lipophilicity and size are already covered by the
-# whole-molecule descriptors.
+# whole-molecule descriptors. Also skip the Chi connectivity indices, Morgan
+# fingerprint densities, duplicate molecular weights, Ipc and radical count.
+_redundant = {"HeavyAtomMolWt", "ExactMolWt", "Ipc", "NumRadicalElectrons"}
 _descriptors = [
     fn for name, fn in Descriptors.descList
-    if not name.startswith("fr_") and "VSA" not in name
+    if not name.startswith(("fr_", "Chi", "FpDensityMorgan"))
+    and "VSA" not in name
+    and name not in _redundant
 ]
 
 
@@ -39,7 +43,7 @@ def featurize(smiles):
             else np.array([_describe(mol, fn) for fn in _descriptors])
         )
     X = np.nan_to_num(np.vstack(rows), nan=0.0, posinf=1e10, neginf=-1e10)
-    # Some descriptors (e.g. Ipc) can exceed the float32 range.
+    # Guard against descriptor values too large for float32.
     return np.clip(X, -1e10, 1e10).astype(np.float32)
 
 
