@@ -61,20 +61,23 @@ def _ionization(mol):
     return [bases + cations - acids]
 
 
-# Fixed, not fitted: extra polar-area penalty (square angstroms) per donor.
+# Fixed, not fitted: extra polar-area penalty (square angstroms) per donor,
+# and polar-area credit per unit of charge-penalised logP.
 _DONOR_WEIGHT = 20.0
-_N_COMPACT = 4
+_LOGP_WEIGHT = 20.0
+_N_COMPACT = 3
 
 
 def _compact(mol):
-    """Size, charge-penalised logP, donor-weighted polarity, BCUT logP."""
+    """Size, net polarity (polar area offset by logP), BCUT logP."""
     d = {fn_name: _describe(mol, fn)
          for fn_name, fn in Descriptors.descList if fn_name in _selected}
     charge = _ionization(mol)[0]
+    polarity = d["TPSA"] + _DONOR_WEIGHT * d["NumHDonors"]
+    lipophilicity = d["MolLogP"] - abs(charge)
     return [
         d["MolWt"],
-        d["MolLogP"] - abs(charge),
-        d["TPSA"] + _DONOR_WEIGHT * d["NumHDonors"],
+        polarity - _LOGP_WEIGHT * lipophilicity,
         d["BCUT2D_LOGPHI"],
     ]
 
