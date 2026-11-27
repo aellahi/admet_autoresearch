@@ -13,9 +13,13 @@ import prepare
 
 RDLogger.DisableLog("rdApp.*")
 
-# Skip the fr_* fragment counts: sparse, and polarity and H-bonding are already
-# covered by the whole-molecule descriptors.
-_descriptors = [fn for name, fn in Descriptors.descList if not name.startswith("fr_")]
+# Skip the fr_* fragment counts (sparse) and the binned *VSA* surface-area
+# histograms: polarity, lipophilicity and size are already covered by the
+# whole-molecule descriptors.
+_descriptors = [
+    fn for name, fn in Descriptors.descList
+    if not name.startswith("fr_") and "VSA" not in name
+]
 
 
 def _describe(mol, fn):
