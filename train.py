@@ -17,9 +17,9 @@ RDLogger.DisableLog("rdApp.*")
 # flexibility, shape and charge distribution.
 _selected = {
     "MolWt", "MolLogP", "TPSA",
-    "NumHDonors", "NumHAcceptors",
+    "NumHDonors",
     "NumRotatableBonds", "FractionCSP3", "NumAromaticRings",
-    "qed", "HallKierAlpha",
+    "HallKierAlpha",
     "MinPartialCharge", "MinEStateIndex",
     "BCUT2D_LOGPHI", "BCUT2D_LOGPLOW",
 }
@@ -55,17 +55,15 @@ _base_patterns = [
 ]
 # Quaternary or already protonated nitrogen, excluding N-oxides.
 _cation_pattern = Chem.MolFromSmarts("[$([NX4+]),$([nX3+]);!$([#7+]-[O-])]")
-_N_IONIZATION = 4
+_N_IONIZATION = 1
 
 
 def _ionization(mol):
-    """Acid and base counts, approximate net charge, zwitterion flag."""
+    """Approximate net charge."""
     acids = sum(len(mol.GetSubstructMatches(p)) for p in _acid_patterns)
     bases = sum(len(mol.GetSubstructMatches(p)) for p in _base_patterns)
     cations = len(mol.GetSubstructMatches(_cation_pattern))
-    positive = bases + cations
-    return [acids, bases, positive - acids,
-            float(acids > 0 and positive > 0)]
+    return [bases + cations - acids]
 
 
 def featurize(smiles):
