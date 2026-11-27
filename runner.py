@@ -29,6 +29,7 @@ from datetime import datetime
 from pathlib import Path
 
 import prepare
+import report
 
 # Measured noise floor: the smallest paired difference distinguishable on
 # 91 validation molecules across five seeds is about 0.027 MAE.
@@ -346,6 +347,12 @@ def main():
         print(f"    {agent_s + m['seconds']:.0f}s total — "
               f"{agent_s:.0f}s agent, {m['featurize_seconds']:.0f}s featurize, "
               f"{m['fit_seconds']:.0f}s fit, {m['predict_seconds']:.0f}s predict")
+        # Keep the dashboard's data file current as the campaign runs, so a
+        # refresh is only a republish.
+        try:
+            report.build()
+        except Exception as exc:
+            print(f"    (report.json not rebuilt: {exc})")
 
     if best is None:
         print("\nDone. Nothing scored.")

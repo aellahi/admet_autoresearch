@@ -41,11 +41,8 @@ def _f(value, default=None):
         return default
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--print", action="store_true", dest="echo")
-    args = ap.parse_args()
-
+def build():
+    """Read the ledger, write .runs/report.json, return it."""
     ledger, log, audit = _rows(RESULTS), _rows(LOG), _rows(AUDIT)
 
     experiments, best, running = [], None, []
@@ -123,6 +120,15 @@ def main():
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(report, indent=2))
+    return report
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--print", action="store_true", dest="echo")
+    args = ap.parse_args()
+
+    report = build()
     print(f"wrote {OUT}  ({report['iterations']} iterations, "
           f"best {report['best_mae']:.4f})" if report["best_mae"]
           else f"wrote {OUT}")
