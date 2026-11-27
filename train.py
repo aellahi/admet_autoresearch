@@ -13,12 +13,11 @@ import prepare
 
 RDLogger.DisableLog("rdApp.*")
 
-# A compact hand-picked set covering size, lipophilicity, polarity, H-bonding,
-# drug-likeness and charge distribution.
+# A compact hand-picked set covering size, lipophilicity, polarity and
+# H-bonding.
 _selected = {
     "MolWt", "MolLogP", "TPSA",
-    "NumHDonors", "qed",
-    "MinPartialCharge",
+    "NumHDonors",
     "BCUT2D_LOGPHI",
 }
 _descriptors = [fn for name, fn in Descriptors.descList if name in _selected]
@@ -53,15 +52,15 @@ _base_patterns = [
 ]
 # Quaternary or already protonated nitrogen, excluding N-oxides.
 _cation_pattern = Chem.MolFromSmarts("[$([NX4+]),$([nX3+]);!$([#7+]-[O-])]")
-_N_IONIZATION = 2
+_N_IONIZATION = 1
 
 
 def _ionization(mol):
-    """Acid count and approximate net charge."""
+    """Approximate net charge."""
     acids = sum(len(mol.GetSubstructMatches(p)) for p in _acid_patterns)
     bases = sum(len(mol.GetSubstructMatches(p)) for p in _base_patterns)
     cations = len(mol.GetSubstructMatches(_cation_pattern))
-    return [acids, bases + cations - acids]
+    return [bases + cations - acids]
 
 
 def featurize(smiles):
