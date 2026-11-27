@@ -11,6 +11,7 @@ occasionally -- every ten or twenty keeps -- and never feed the number back
 into the search.
 """
 
+import argparse
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,12 @@ AUDIT_LOG = AUDIT_DIR / "audit.tsv"
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--iteration", type=int, default=None,
+                    help="override the iteration this measures; 0 means "
+                         "before the campaign started")
+    args = ap.parse_args()
+
     commit = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
         capture_output=True, text=True, check=False,
@@ -30,7 +37,10 @@ def main():
 
     # Which iteration this measures, so the progress chart can place it.
     ledger = Path("results.tsv")
-    iteration = max(0, len(ledger.read_text().splitlines()) - 1) if ledger.exists() else 0
+    if args.iteration is not None:
+        iteration = args.iteration
+    else:
+        iteration = max(0, len(ledger.read_text().splitlines()) - 1) if ledger.exists() else 0
 
     m = prepare.run_audit(train.featurize, train.make_model)
 

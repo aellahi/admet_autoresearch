@@ -88,13 +88,27 @@ def main():
     } for a in audit if _f(a.get("test_mae")) is not None]
 
     scored_only = [e for e in experiments if e["valid_mae"] is not None]
+
+    # Where the campaign started, on all three splits. The held-out figure
+    # comes from an audit recorded at iteration 0; without one it stays None
+    # rather than borrowing a later number.
+    first = scored_only[0] if scored_only else {}
+    pre = next((a for a in audits if a["iteration"] == 0), None)
+    baseline = {
+        "train_mae": first.get("train_mae"),
+        "valid_mae": first.get("valid_mae"),
+        "test_mae": pre["test_mae"] if pre else None,
+        "n_features": first.get("n_features"),
+    }
+
     report = {
         "generated": datetime.now().isoformat(timespec="seconds"),
         "task": "Caco2_Wang",
         "iterations": len(experiments),
         "kept": sum(1 for e in experiments if e["kept"] and e["status"] != "baseline"),
         "crashes": sum(1 for e in experiments if e["status"] == "crash"),
-        "baseline_mae": scored_only[0]["valid_mae"] if scored_only else None,
+        "baseline": baseline,
+        "baseline_mae": baseline["valid_mae"],
         "best_mae": best,
         "lowest_seen": min((e["valid_mae"] for e in scored_only), default=None),
         "best_features": next(
