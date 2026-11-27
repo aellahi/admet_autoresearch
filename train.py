@@ -20,7 +20,6 @@ _selected = {
     "NumHDonors",
     "BCUT2D_LOGPHI",
 }
-_descriptors = [fn for name, fn in Descriptors.descList if name in _selected]
 
 
 def _describe(mol, fn):
@@ -52,7 +51,6 @@ _base_patterns = [
 ]
 # Quaternary or already protonated nitrogen, excluding N-oxides.
 _cation_pattern = Chem.MolFromSmarts("[$([NX4+]),$([nX3+]);!$([#7+]-[O-])]")
-_N_IONIZATION = 1
 
 
 def _ionization(mol):
@@ -63,16 +61,31 @@ def _ionization(mol):
     return [bases + cations - acids]
 
 
+# Fixed, not fitted: extra polar-area penalty (square angstroms) per donor.
+_DONOR_WEIGHT = 20.0
+_N_COMPACT = 4
+
+
+def _compact(mol):
+    """Size, charge-penalised logP, donor-weighted polarity, BCUT logP."""
+    d = {fn_name: _describe(mol, fn)
+         for fn_name, fn in Descriptors.descList if fn_name in _selected}
+    charge = _ionization(mol)[0]
+    return [
+        d["MolWt"],
+        d["MolLogP"] - abs(charge),
+        d["TPSA"] + _DONOR_WEIGHT * d["NumHDonors"],
+        d["BCUT2D_LOGPHI"],
+    ]
+
+
 def featurize(smiles):
     """list[str] -> (len(smiles), n_features) float32, finite, deterministic."""
     rows = []
     for smi in smiles:
         mol = Chem.MolFromSmiles(smi)
         rows.append(
-            np.zeros(len(_descriptors) + _N_IONIZATION) if mol is None
-            else np.array(
-                [_describe(mol, fn) for fn in _descriptors] + _ionization(mol)
-            )
+            np.zeros(_N_COMPACT) if mol is None else np.array(_compact(mol))
         )
     X = np.nan_to_num(np.vstack(rows), nan=0.0, posinf=1e10, neginf=-1e10)
     # Guard against descriptor values too large for float32.
