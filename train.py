@@ -13,14 +13,11 @@ import prepare
 
 RDLogger.DisableLog("rdApp.*")
 
-# A compact hand-picked set covering size, lipophilicity, polarity, H-bonding,
-# flexibility, shape and electronic state.
+# A compact hand-picked set covering size, lipophilicity, polarity and
+# H-bonding; net charge is appended below.
 _selected = {
     "MolWt", "MolLogP", "TPSA",
     "NumHDonors",
-    "NumRotatableBonds",
-    "HallKierAlpha",
-    "MinEStateIndex",
     "BCUT2D_LOGPHI",
 }
 _descriptors = [fn for name, fn in Descriptors.descList if name in _selected]
