@@ -67,7 +67,7 @@ def _claude_bin():
     return str(bundles[-1]) if bundles else None
 
 
-def _spawn_agent():
+def _spawn_agent(model, iteration):
     """Let an agent edit train.py. Returns its one-line description."""
     binary = _claude_bin()
     if not binary:
@@ -75,15 +75,26 @@ def _spawn_agent():
             "No claude binary found. Install the CLI, or set CLAUDE_BIN to one."
         )
     result = subprocess.run(
-        [binary, "-p", PROMPT, "--settings", SETTINGS],
+        [binary, "-p", PROMPT, "--settings", SETTINGS, "--model", model],
         capture_output=True, text=True, timeout=AGENT_TIMEOUT,
+        stdin=subprocess.DEVNULL,
     )
     out = (result.stdout or "") + (result.stderr or "")
+
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    (RUNS_DIR / f"agent-{iteration:03d}.log").write_text(out)
+
     if "Please run /login" in out:
         raise SystemExit(
             f"{binary} is not logged in. Run it once interactively and sign in,\n"
             "or point CLAUDE_BIN at a CLI that is."
         )
+    if "API Error" in out:
+        # Surface it rather than reporting a silent "no change". Drug-property
+        # work sometimes trips the bio safeguards; --model picks another.
+        first = next(l for l in out.splitlines() if "API Error" in l)
+        raise SystemExit(f"Agent call failed:\n  {first.strip()[:300]}")
+
     for line in reversed(out.splitlines()):
         if line.strip().startswith("IDEA:"):
             return line.split("IDEA:", 1)[1].strip()[:90]
@@ -142,11 +153,22 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--iterations", type=int, default=10)
     ap.add_argument("--no-agent", action="store_true")
+    ap.add_argument("--model", default="sonnet")
     args = ap.parse_args()
 
     best, keeps = _load_state()
     if best is not None:
         print(f"resuming — best valid_mae {best:.6f}, {keeps} kept so far")
+    else:
+        # Score train.py as it stands before any agent touches it, so the
+        # bar is the baseline rather than whatever the first agent wrote.
+        print("no state — scoring the baseline first", flush=True)
+        train = _load_train()
+        m = prepare.run_validation(train.featurize, train.make_model)
+        best, keeps = m["mae"], 0
+        _record(m, "baseline", "baseline as committed", best, keeps, None)
+        _save_state(best, keeps)
+        print(f"  BASELINE valid_mae {best:.4f}  train_mae {m['train_mae']:.4f}")
     kept_here = 0
 
     for i in range(1, args.iterations + 1):
@@ -156,7 +178,7 @@ def main():
             description = "(no-agent: scoring train.py as it stands)"
         else:
             before = Path("train.py").read_text()
-            description = _spawn_agent()
+            description = _spawn_agent(args.model, i)
             if Path("train.py").read_text() == before:
                 print(f"  no change to train.py -- {description}")
                 _record(None, "no-change", description, best, keeps, None)
