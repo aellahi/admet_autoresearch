@@ -8,6 +8,9 @@ the agent is gone. It cannot see the result of its own change until the
 next iteration reads results.tsv.
 
     --iterations N   how many experiments to run (default 10)
+    --model NAME     sonnet (default) or haiku. Opus 5.5 refuses this prompt;
+                     its safeguards flag drug-property work as bio-adjacent.
+    --effort LEVEL   low | medium | high (default) | xhigh | max
     --no-agent       skip the spawn and score train.py as it stands, for
                      checking the harness without burning tokens
 """
@@ -67,7 +70,7 @@ def _claude_bin():
     return str(bundles[-1]) if bundles else None
 
 
-def _spawn_agent(model, iteration):
+def _spawn_agent(model, effort, iteration):
     """Let an agent edit train.py. Returns its one-line description."""
     binary = _claude_bin()
     if not binary:
@@ -75,7 +78,8 @@ def _spawn_agent(model, iteration):
             "No claude binary found. Install the CLI, or set CLAUDE_BIN to one."
         )
     result = subprocess.run(
-        [binary, "-p", PROMPT, "--settings", SETTINGS, "--model", model],
+        [binary, "-p", PROMPT, "--settings", SETTINGS,
+         "--model", model, "--effort", effort],
         capture_output=True, text=True, timeout=AGENT_TIMEOUT,
         stdin=subprocess.DEVNULL,
     )
@@ -154,6 +158,8 @@ def main():
     ap.add_argument("--iterations", type=int, default=10)
     ap.add_argument("--no-agent", action="store_true")
     ap.add_argument("--model", default="sonnet")
+    ap.add_argument("--effort", default="high",
+                    choices=["low", "medium", "high", "xhigh", "max"])
     args = ap.parse_args()
 
     best, keeps = _load_state()
@@ -178,7 +184,7 @@ def main():
             description = "(no-agent: scoring train.py as it stands)"
         else:
             before = Path("train.py").read_text()
-            description = _spawn_agent(args.model, i)
+            description = _spawn_agent(args.model, args.effort, i)
             if Path("train.py").read_text() == before:
                 print(f"  no change to train.py -- {description}")
                 _record(None, "no-change", description, best, keeps, None)
