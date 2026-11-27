@@ -16,13 +16,12 @@ RDLogger.DisableLog("rdApp.*")
 # A compact hand-picked set covering size, lipophilicity, polarity, H-bonding,
 # flexibility, shape and charge distribution.
 _selected = {
-    "MolWt", "MolLogP", "MolMR", "TPSA",
+    "MolWt", "MolLogP", "TPSA",
     "NumHDonors", "NumHAcceptors",
     "NumRotatableBonds", "FractionCSP3", "NumAromaticRings",
-    "qed", "BertzCT", "HallKierAlpha",
-    "MaxPartialCharge", "MinPartialCharge",
-    "MaxEStateIndex", "MinEStateIndex",
-    "BCUT2D_MWLOW", "BCUT2D_LOGPHI", "BCUT2D_LOGPLOW", "BCUT2D_MRHI",
+    "qed", "HallKierAlpha",
+    "MinPartialCharge", "MinEStateIndex",
+    "BCUT2D_LOGPHI", "BCUT2D_LOGPLOW",
 }
 _descriptors = [fn for name, fn in Descriptors.descList if name in _selected]
 
