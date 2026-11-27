@@ -16,12 +16,12 @@ RDLogger.DisableLog("rdApp.*")
 # A compact hand-picked set covering size, lipophilicity, polarity, H-bonding,
 # flexibility, shape and charge distribution.
 _selected = {
-    "MolWt", "MolLogP", "MolMR", "TPSA", "LabuteASA",
-    "NumHDonors", "NumHAcceptors", "NHOHCount", "NOCount",
-    "NumRotatableBonds", "FractionCSP3", "NumAromaticRings", "RingCount",
-    "qed", "BertzCT", "BalabanJ", "HallKierAlpha", "Kappa3",
+    "MolWt", "MolLogP", "MolMR", "TPSA",
+    "NumHDonors", "NumHAcceptors",
+    "NumRotatableBonds", "FractionCSP3", "NumAromaticRings",
+    "qed", "BertzCT", "HallKierAlpha",
     "MaxPartialCharge", "MinPartialCharge",
-    "MaxEStateIndex", "MinEStateIndex", "MinAbsEStateIndex",
+    "MaxEStateIndex", "MinEStateIndex",
     "BCUT2D_MWLOW", "BCUT2D_LOGPHI", "BCUT2D_LOGPLOW", "BCUT2D_MRHI",
 }
 _descriptors = [fn for name, fn in Descriptors.descList if name in _selected]
@@ -56,16 +56,16 @@ _base_patterns = [
 ]
 # Quaternary or already protonated nitrogen, excluding N-oxides.
 _cation_pattern = Chem.MolFromSmarts("[$([NX4+]),$([nX3+]);!$([#7+]-[O-])]")
-_N_IONIZATION = 5
+_N_IONIZATION = 4
 
 
 def _ionization(mol):
-    """Acid, base and cation counts, approximate net charge, zwitterion flag."""
+    """Acid and base counts, approximate net charge, zwitterion flag."""
     acids = sum(len(mol.GetSubstructMatches(p)) for p in _acid_patterns)
     bases = sum(len(mol.GetSubstructMatches(p)) for p in _base_patterns)
     cations = len(mol.GetSubstructMatches(_cation_pattern))
     positive = bases + cations
-    return [acids, bases, cations, positive - acids,
+    return [acids, bases, positive - acids,
             float(acids > 0 and positive > 0)]
 
 
