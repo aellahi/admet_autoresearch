@@ -55,7 +55,7 @@ the outcome reaches the next iteration as a row in the ledger above.
 
 End your reply with exactly these two lines:
 IDEA: <at most twelve words naming the change>
-WHY: <one sentence: the hypothesis, and what the scores would show if it holds>"""
+HYPOTHESIS: <one sentence: what you expect and what the scores would show if it holds>"""
 
 
 def _ledger():
@@ -123,15 +123,15 @@ def _spawn_agent(model, effort, iteration):
         first = next(l for l in out.splitlines() if "API Error" in l)
         raise SystemExit(f"Agent call failed:\n  {first.strip()[:300]}")
 
-    idea, why = "(no description given)", ""
+    idea, hypothesis = "(no description given)", ""
     for line in reversed(out.splitlines()):
         s = line.strip()
-        if s.startswith("WHY:") and not why:
-            why = s.split("WHY:", 1)[1].strip()[:240]
+        if s.startswith("HYPOTHESIS:") and not hypothesis:
+            hypothesis = s.split("HYPOTHESIS:", 1)[1].strip()[:240]
         elif s.startswith("IDEA:"):
             idea = s.split("IDEA:", 1)[1].strip()[:90]
             break
-    return idea, why
+    return idea, hypothesis
 
 
 def _load_train():
@@ -168,6 +168,29 @@ def _verdict(mae, features, best, best_features):
     return "discard"
 
 
+def _outcome(status, mae, features, best, best_features):
+    """Why the verdict came out that way, in the ledger's own terms.
+
+    Computed here rather than asked of the agent: the arithmetic is
+    determinate, and an agent asked to explain its own rejection will
+    sometimes invent a reason.
+    """
+    if status == "baseline":
+        return "first measurement; the bar every later change must beat"
+    if best is None:
+        return "nothing to compare against"
+    margin = best - mae
+    if status == "keep":
+        return (f"beat {best:.4f} by {margin:+.4f}, over the {KEEP_THRESHOLD} bar")
+    if status == "simplify":
+        return (f"within noise of {best:.4f} ({margin:+.4f}) using {features} "
+                f"features against {best_features}; kept as a simplification")
+    if margin > 0:
+        return (f"better than {best:.4f} by {margin:+.4f}, but under the "
+                f"{KEEP_THRESHOLD} bar, so indistinguishable from noise")
+    return f"worse than {best:.4f} by {-margin:.4f}"
+
+
 def _append(path, header, row):
     path.parent.mkdir(parents=True, exist_ok=True)
     line = "\t".join(header)
@@ -180,23 +203,24 @@ def _append(path, header, row):
         fh.write("\t".join(str(c).replace("\t", " ") for c in row) + "\n")
 
 
-def _record(m, status, idea, why, best, keeps, note):
+def _record(m, status, idea, hypothesis, outcome, best, keeps):
     commit = _git("rev-parse", "--short", "HEAD")
     train_mae = f"{m['train_mae']:.6f}" if m else "0.000000"
     valid_mae = f"{m['mae']:.6f}" if m else "0.000000"
     feats = str(m["n_features"]) if m else "0"
     _append(
         RESULTS,
-        ["train_mae", "valid_mae", "n_features", "status", "idea", "why"],
-        [train_mae, valid_mae, feats, status, idea, why],
+        ["train_mae", "valid_mae", "n_features", "status", "idea",
+         "hypothesis", "outcome"],
+        [train_mae, valid_mae, feats, status, idea, hypothesis, outcome],
     )
     _append(
         LOG,
         ["timestamp", "commit", "train_mae", "valid_mae", "n_features",
-         "best_valid_mae", "keeps", "status", "idea", "why", "note"],
+         "best_valid_mae", "keeps", "status", "idea", "hypothesis", "outcome"],
         [datetime.now().isoformat(timespec="seconds"), commit, train_mae,
          valid_mae, feats, f"{best:.6f}" if best else "", keeps, status,
-         idea, why, note or ""],
+         idea, hypothesis, outcome],
     )
 
 
@@ -219,7 +243,9 @@ def main():
         train = _load_train()
         m = prepare.run_validation(train.featurize, train.make_model)
         best, keeps, best_features = m["mae"], 0, m["n_features"]
-        _record(m, "baseline", "baseline as committed", "", best, keeps, None)
+        _record(m, "baseline", "baseline as committed", "",
+                _outcome("baseline", best, best_features, None, None),
+                best, keeps)
         _save_state(best, keeps, best_features)
         print(f"  BASELINE valid_mae {best:.4f}  train_mae {m['train_mae']:.4f}")
     kept_here = 0
@@ -228,29 +254,32 @@ def main():
         print(f"\n=== iteration {i} of {args.iterations} ===", flush=True)
 
         if args.no_agent:
-            idea, why = "(no-agent: scoring train.py as it stands)", ""
+            idea, hypothesis = "(no-agent: scoring train.py as it stands)", ""
         else:
             before = Path("train.py").read_text()
-            idea, why = _spawn_agent(args.model, args.effort, i)
+            idea, hypothesis = _spawn_agent(args.model, args.effort, i)
             if Path("train.py").read_text() == before:
                 print(f"  no change to train.py -- {idea}")
-                _record(None, "no-change", idea, why, best, keeps, None)
+                _record(None, "no-change", idea, hypothesis,
+                        "the agent left train.py untouched", best, keeps)
                 continue
             print(f"  agent: {idea}")
-            if why:
-                print(f"     why: {why}")
+            if hypothesis:
+                print(f"    expects: {hypothesis}")
 
         # Everything below here runs with the agent gone.
         try:
             train = _load_train()
             m = prepare.run_validation(train.featurize, train.make_model)
-        except Exception:
+        except Exception as exc:
             traceback.print_exc()
             _git("checkout", "--", "train.py")
-            _record(None, "crash", idea, why, best, keeps, "exception")
+            _record(None, "crash", idea, hypothesis,
+                    f"raised {type(exc).__name__}: {str(exc)[:120]}", best, keeps)
             print("  CRASH -- reverted")
             continue
 
+        prev_best, prev_features = best, best_features
         status = _verdict(m["mae"], m["n_features"], best, best_features)
         if status in ("keep", "simplify"):
             best, best_features = m["mae"], m["n_features"]
@@ -260,7 +289,10 @@ def main():
         else:
             _git("checkout", "--", "train.py")
 
-        _record(m, status, idea, why, best, keeps, None)
+        outcome = _outcome(status, m["mae"], m["n_features"],
+                           prev_best, prev_features)
+        print(f"    {outcome}")
+        _record(m, status, idea, hypothesis, outcome, best, keeps)
         _save_state(best, keeps, best_features)
         print(f"  {status.upper():8} valid_mae {m['mae']:.4f}  "
               f"train_mae {m['train_mae']:.4f}  "

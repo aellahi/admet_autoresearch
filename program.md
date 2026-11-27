@@ -31,10 +31,13 @@ train only. Fitting on the held-out split is leakage and invalidates the run.
 
 ## How to choose
 
-The ledger of every experiment so far is in your prompt: for each one, the
-hypothesis, what was changed, `train_mae`, `valid_mae`, the feature count and
-whether it was kept. Read it before deciding. Do not repeat a failure, and
-build on what held.
+The ledger of every experiment so far is in your prompt. Each row carries the
+`idea`, the `hypothesis` behind it, `train_mae`, `valid_mae`, `n_features`,
+the `status`, and an `outcome` saying why that verdict followed.
+
+Read it before deciding. Compare each hypothesis against its outcome — a
+prediction that missed tells you more than one that landed. Do not repeat a
+failure, and build on what held.
 
 `train_mae` is a diagnostic, never a target:
 
@@ -63,7 +66,8 @@ killed and counted as a failure.
 Stop after one edit. End your reply with:
 
 ```
-IDEA: <at most twelve words describing what you changed>
+IDEA: <at most twelve words naming the change>
+HYPOTHESIS: <one sentence: what you expect, and what the scores would show if it holds>
 ```
 
 You will not see the result. `runner.py` scores your change after you exit,
